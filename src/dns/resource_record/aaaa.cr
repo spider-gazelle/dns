@@ -1,6 +1,6 @@
 module DNS
   struct ResourceRecord::AAAA < ResourceRecord::Payload
-    property address : String
+    getter address : String
 
     def initialize(rdata : Bytes, message : Bytes)
       @address = rdata.each_slice(2).map { |bytes|
