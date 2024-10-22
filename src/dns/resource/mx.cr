@@ -1,19 +1,19 @@
 module DNS
   # MX record parsing
-  struct ResourceRecord::MX < ResourceRecord::Payload
+  struct Resource::MX < Resource
     getter preference : UInt16
     getter exchange : String
 
-    def initialize(rdata : Bytes, message : Bytes)
-      io = IO::Memory.new(rdata)
+    def initialize(resource_data : Bytes, message : Bytes)
+      io = IO::Memory.new(resource_data)
 
       # MX records start with a 16-bit preference value (priority)
       @preference = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
 
       # Following the preference is the domain name of the mail exchange server
-      @exchange = ResourceRecord::Payload.read_labels(io, message)
+      @exchange = Resource.read_labels(io, message)
     end
   end
 
-  ResourceRecord.register_record(RecordCode::MX, ResourceRecord::MX)
+  Resource.register_record(RecordCode::MX, Resource::MX)
 end

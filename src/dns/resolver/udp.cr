@@ -32,7 +32,7 @@ class DNS::Resolver::UDP < DNS::Resolver
   property port : UInt16
 
   # perform the DNS query, fetching using request_id => record_code
-  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Response ->)
+  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
     ip = Socket::IPAddress.new(dns_server, port)
     socket = UDPSocket.new ip.family
 
@@ -42,7 +42,7 @@ class DNS::Resolver::UDP < DNS::Resolver
 
       # pipeline the requests
       fetch.each do |id, record|
-        query_bytes = DNS::Question.build_query(domain, record, id)
+        query_bytes = DNS::Packet::Question.build_query(domain, record, id)
         socket.send(query_bytes)
       end
 
@@ -53,7 +53,7 @@ class DNS::Resolver::UDP < DNS::Resolver
       loop do
         received_length, _ip_address = socket.receive buffer
         raise IO::Error.new("mDNS query failed, zero bytes received") if received_length.zero?
-        dns_response = DNS::Response.from_slice buffer[0, received_length]
+        dns_response = DNS::Packet.from_slice buffer[0, received_length]
 
         # ignore anything we are not expecting
         if fetch[dns_response.id]?

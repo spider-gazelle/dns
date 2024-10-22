@@ -6,13 +6,13 @@ class DNS::SimpleCache
   @lock : Mutex = Mutex.new
 
   def initialize
-    @cache = Hash(String, Hash(UInt16, Tuple(Time, DNS::ResourceRecord))).new do |hash, domain|
-      hash[domain] = Hash(UInt16, Tuple(Time, DNS::ResourceRecord)).new
+    @cache = Hash(String, Hash(UInt16, Tuple(Time, DNS::Packet::ResourceRecord))).new do |hash, domain|
+      hash[domain] = Hash(UInt16, Tuple(Time, DNS::Packet::ResourceRecord)).new
     end
   end
 
   # check for a cached record
-  def lookup(domain : String, query : UInt16) : DNS::ResourceRecord?
+  def lookup(domain : String, query : UInt16) : DNS::Packet::ResourceRecord?
     now = Time.utc
 
     @lock.synchronize do
@@ -32,7 +32,7 @@ class DNS::SimpleCache
   end
 
   # store a result in the cache
-  def store(domain : String, result : DNS::ResourceRecord)
+  def store(domain : String, result : DNS::Packet::ResourceRecord)
     expiry_time = result.ttl.from_now
     @lock.synchronize { @cache[domain][result.type] = {expiry_time, result} }
   end

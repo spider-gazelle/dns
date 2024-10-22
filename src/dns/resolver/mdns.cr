@@ -8,7 +8,7 @@ class DNS::Resolver::MDNS < DNS::Resolver
   property port : UInt16
 
   # perform the DNS query, fetching using request_id => record_code
-  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Response ->)
+  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
     ip = Socket::IPAddress.new(dns_server, port)
     socket = UDPSocket.new ip.family
 
@@ -24,7 +24,7 @@ class DNS::Resolver::MDNS < DNS::Resolver
       fetch.each do |_id, record|
         # query class set to Internet + QU bit for unicast responses
         # mDNS id's are always set to 0
-        query_bytes = DNS::Question.build_query(domain, record, 0_u16, qclass: 0x8001_u16)
+        query_bytes = DNS::Packet::Question.build_query(domain, record, 0_u16, class_code: 0x8001_u16)
         socket.send query_bytes, ip
       end
 
@@ -35,7 +35,7 @@ class DNS::Resolver::MDNS < DNS::Resolver
       loop do
         received_length, _ip_address = socket.receive buffer
         raise IO::Error.new("DNS query failed, zero bytes received") if received_length.zero?
-        dns_response = DNS::Response.from_slice buffer[0, received_length]
+        dns_response = DNS::Packet.from_slice buffer[0, received_length]
 
         # ignore anything we are not expecting
         if dns_response.answers.any? { |answer| answer.name.downcase == domain.downcase && answer.type.in?(fetch.values) }

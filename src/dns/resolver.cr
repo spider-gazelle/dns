@@ -7,7 +7,7 @@ abstract class DNS::Resolver
   property failure_limit : Int32 = 3
 
   # perform the DNS query, fetching using request_id => record_code
-  abstract def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Response ->)
+  abstract def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
 
   # returns the list of DNS servers and their current ordering
   def servers
@@ -47,7 +47,7 @@ abstract class DNS::Resolver
     begin
       attempts = servers.size
       index = 0
-      error = uninitialized IO::Error | DNS::Response::ServerError
+      error = uninitialized IO::Error | DNS::Packet::ServerError
 
       loop do
         server = servers[index]
@@ -71,7 +71,7 @@ abstract class DNS::Resolver
             # Try the next server
             index = (index + 1) % servers.size
           end
-        rescue ex : IO::Error | DNS::Response::ServerError
+        rescue ex : IO::Error | DNS::Packet::ServerError
           error = ex
 
           # Move server to the end of the list due to connection error

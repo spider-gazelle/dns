@@ -9,14 +9,14 @@ class DNS::Resolver::HTTPS < DNS::Resolver
   property tls_context : OpenSSL::SSL::Context::Client?
 
   # Perform the DNS query, fetching using request_id => record_code
-  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Response ->)
+  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
     uri = URI.parse(dns_server)
     client = HTTP::Client.new(uri, tls: @tls_context)
 
     begin
       fetch.each do |id, record|
         # Build the DNS query bytes
-        query_bytes = DNS::Question.build_query(domain, record, id)
+        query_bytes = DNS::Packet::Question.build_query(domain, record, id)
 
         # Build the HTTP request
         request = HTTP::Request.new("POST", uri.request_target)
@@ -28,8 +28,8 @@ class DNS::Resolver::HTTPS < DNS::Resolver
         response = client.exec(request)
 
         # Check the response
-        raise DNS::Response::ServerError.new("DNS query failed with HTTP status #{response.status_code}") unless response.success?
-        dns_response = DNS::Response.from_slice(response.body.to_slice)
+        raise DNS::Packet::ServerError.new("DNS query failed with HTTP status #{response.status_code}") unless response.success?
+        dns_response = DNS::Packet.from_slice(response.body.to_slice)
         yield dns_response
       end
     ensure

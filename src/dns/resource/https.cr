@@ -1,15 +1,15 @@
 module DNS
   # HTTPS record parsing
-  struct ResourceRecord::HTTPS < ResourceRecord::Payload
+  struct Resource::HTTPS < Resource
     getter priority : UInt16
     getter target_name : String
     getter alpn : Array(String)
     getter svcparam : Hash(UInt16, Bytes)
 
-    def initialize(rdata : Bytes, message : Bytes)
-      io = IO::Memory.new(rdata)
+    def initialize(resource_data : Bytes, message : Bytes)
+      io = IO::Memory.new(resource_data)
       @priority = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
-      @target_name = ResourceRecord::Payload.read_labels(io, message)
+      @target_name = Resource.read_labels(io, message)
 
       @svcparam = {} of UInt16 => Bytes
       @alpn = [] of String
@@ -35,5 +35,5 @@ module DNS
     end
   end
 
-  ResourceRecord.register_record(RecordCode::HTTPS, ResourceRecord::HTTPS)
+  Resource.register_record(RecordCode::HTTPS, Resource::HTTPS)
 end

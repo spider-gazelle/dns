@@ -1,10 +1,10 @@
 module DNS
   # TXT record parsing
-  struct ResourceRecord::TXT < ResourceRecord::Payload
+  struct Resource::TXT < Resource
     getter text_data : Array(String) # Array of strings as multiple TXT records can exist
 
-    def initialize(rdata : Bytes, message : Bytes)
-      io = IO::Memory.new(rdata)
+    def initialize(resource_data : Bytes, message : Bytes)
+      io = IO::Memory.new(resource_data)
       @text_data = [] of String
 
       # TXT records can have one or more strings, each prefixed by a length byte
@@ -15,5 +15,5 @@ module DNS
     end
   end
 
-  ResourceRecord.register_record(RecordCode::TXT, ResourceRecord::TXT)
+  Resource.register_record(RecordCode::TXT, Resource::TXT)
 end

@@ -1,12 +1,12 @@
-require "./resource_record"
+require "./packet"
 
 # an interface for caching DNS entries up to TTL
 module DNS::Cache
   # check for a cached record
-  abstract def lookup(domain : String, query : Query) : DNS::ResourceRecord?
+  abstract def lookup(domain : String, query : Query) : DNS::Packet::ResourceRecord?
 
   # store a result in the cache
-  abstract def store(domain : String, result : DNS::ResourceRecord)
+  abstract def store(domain : String, result : DNS::Packet::ResourceRecord)
 
   # cleanup any expired entries
   abstract def cleanup : Nil
@@ -14,7 +14,7 @@ module DNS::Cache
   # remove all entries
   abstract def clear : Nil
 
-  def store(domain : String, response : DNS::Response)
+  def store(domain : String, response : DNS::Packet)
     response.answers.each { |answer| store(domain, answer) }
 
     # If a DNS query asks for an MX (Mail Exchange) record,

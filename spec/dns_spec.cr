@@ -10,11 +10,11 @@ describe DNS do
     bytes1 = "f30c818000010001000000000377777706676f6f676c6503636f6d0000410001c00c0041000100004c3c000d00010000010006026832026833".hexbytes
     bytes2 = "cbf2818000010001000000000377777706676f6f676c6503636f6d0000410001c00c00410001000047ec000d00010000010006026832026833".hexbytes
 
-    response1 = DNS::Response.from_slice bytes1
-    response2 = DNS::Response.from_slice bytes2
+    response1 = DNS::Packet.from_slice bytes1
+    response2 = DNS::Packet.from_slice bytes2
 
-    response1.answers.first.payload.as(DNS::ResourceRecord::HTTPS).alpn.should eq ["h2", "h3"]
-    response2.answers.first.payload.as(DNS::ResourceRecord::HTTPS).alpn.should eq ["h2", "h3"]
+    response1.answers.first.resource.as(DNS::Resource::HTTPS).alpn.should eq ["h2", "h3"]
+    response2.answers.first.resource.as(DNS::Resource::HTTPS).alpn.should eq ["h2", "h3"]
   end
 
   it "queries google for A, AAAA and SVCB records" do
@@ -46,7 +46,7 @@ describe DNS do
   end
 
   it "handles errors when returned from the server" do
-    expect_raises(DNS::Response::NameError, "querying ww1.notexisting12345.com for A") do
+    expect_raises(DNS::Packet::NameError, "querying ww1.notexisting12345.com for A") do
       DNS.query(
         "ww1.notexisting12345.com",
         [

@@ -11,6 +11,13 @@ module DNS
     /.+\.local$/i => Resolver::MDNS.new,
   }
 
+  # Opcode: Specifies the kind of query in this message.
+  enum OpCode : UInt8
+    QUERY  = 0 # a standard query
+    IQUERY = 1 # an inverse query
+    STATUS = 2 # a server status request
+  end
+
   enum RecordCode : UInt16
     A          =     1 # Maps a domain name to an IPv4 address
     NS         =     2 # Name Server record, indicates authoritative DNS servers for the domain
@@ -76,7 +83,7 @@ module DNS
   end
 
   # return the raw DNS responses without processing the answers / using cache
-  def self.raw_query(domain : String, query_records : Array(RecordCode | UInt16)) : Array(DNS::Response)
+  def self.raw_query(domain : String, query_records : Array(RecordCode | UInt16)) : Array(DNS::Packet)
     # select a resolver for this domain (i.e. mDNS for .local domains)
     resolver = select_resolver(domain)
 
@@ -93,7 +100,7 @@ module DNS
       queries_to_send[query_id] = query
     end
 
-    answers = [] of DNS::Response
+    answers = [] of DNS::Packet
     resolver.select_server do |dns_server|
       resolver.query(domain, dns_server, queries_to_send) do |response|
         answers << response
@@ -103,8 +110,8 @@ module DNS
   end
 
   # query the DNS records of a domain and return the answers
-  def self.query(domain : String, query_records : Array(RecordCode | UInt16)) : Array(DNS::ResourceRecord)
-    answers = [] of DNS::ResourceRecord
+  def self.query(domain : String, query_records : Array(RecordCode | UInt16)) : Array(DNS::Packet::ResourceRecord)
+    answers = [] of DNS::Packet::ResourceRecord
     query_records = query_records.map { |query| query.is_a?(RecordCode) ? query.value : query }
 
     # Check cache and collect the queries we need to transmit

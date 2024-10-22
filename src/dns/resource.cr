@@ -1,6 +1,6 @@
-# base class for all record payloads
-abstract struct DNS::ResourceRecord::Payload
-  abstract def initialize(rdata : Bytes, message : Bytes)
+# base class for all record resources
+abstract struct DNS::Resource
+  abstract def initialize(resource_data : Bytes, message : Bytes)
 
   def self.read_labels(io : IO::Memory) : String
     read_labels(io, io.to_slice)
@@ -30,4 +30,19 @@ abstract struct DNS::ResourceRecord::Payload
     io.pos = pointer
     read_labels(io, message)
   end
+
+  class_getter parsers = Hash(UInt16, Proc(Bytes, Bytes, Resource?)).new
+
+  macro register_record(type, parser)
+    {% if type.is_a?(Path) %}
+      %type_code = {{type}}.value
+    {% else %}
+      %type_code = {{type}}
+    {% end %}
+    DNS::Resource.parsers[%type_code] = Proc(Bytes, Bytes, DNS::Resource?).new do |resource_data, message|
+      {{parser}}.new(resource_data, message)
+    end
+  end
 end
+
+require "./resource/*"

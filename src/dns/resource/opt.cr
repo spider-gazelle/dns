@@ -1,5 +1,5 @@
 module DNS
-  struct ResourceRecord::OPT < ResourceRecord::Payload
+  struct Resource::OPT < Resource
     getter ecs_family : UInt16? = nil
     getter ecs_source_prefix_length : UInt8? = nil
     getter ecs_scope_prefix_length : UInt8? = nil
@@ -7,32 +7,32 @@ module DNS
     getter edns_padding_length : UInt64? = nil
     getter options : Hash(UInt16, Bytes)
 
-    def initialize(rdata : Bytes, message : Bytes)
+    def initialize(resource_data : Bytes, message : Bytes)
       @options = {} of UInt16 => Bytes
 
       index = 0
 
-      while index < rdata.size
+      while index < resource_data.size
         # Ensure that there are at least 4 bytes to read the option code and length
-        if index + 4 > rdata.size
+        if index + 4 > resource_data.size
           raise "Incomplete OPT record data at index #{index}"
         end
 
         # Read option code (2 bytes, big-endian)
-        option_code = (rdata[index].to_u16 << 8) | rdata[index + 1].to_u16
+        option_code = (resource_data[index].to_u16 << 8) | resource_data[index + 1].to_u16
         index += 2
 
         # Read option length (2 bytes, big-endian)
-        option_length = (rdata[index].to_u16 << 8) | rdata[index + 1].to_u16
+        option_length = (resource_data[index].to_u16 << 8) | resource_data[index + 1].to_u16
         index += 2
 
-        # Ensure the option data is within the bounds of rdata
-        if index + option_length > rdata.size
+        # Ensure the option data is within the bounds of resource_data
+        if index + option_length > resource_data.size
           raise "Option length exceeds RDATA size at index #{index}"
         end
 
         # Read option data
-        option_data = rdata[index, option_length]
+        option_data = resource_data[index, option_length]
         index += option_length
 
         # Handle known option codes
@@ -78,5 +78,5 @@ module DNS
     end
   end
 
-  ResourceRecord.register_record(RecordCode::OPT, ResourceRecord::OPT)
+  Resource.register_record(RecordCode::OPT, Resource::OPT)
 end
