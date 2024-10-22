@@ -21,10 +21,6 @@ struct DNS::ResourceRecord
     end
   end
 
-  def self.register_record(type : UInt16 | RecordCode, parser : Payload)
-    @@parsers[type.is_a?(RecordCode) ? type.value : type] = parser
-  end
-
   def initialize(@name : String, @type : UInt16, @class_code : UInt16, @ttl : UInt32, @rdlength : UInt16, @rdata : Bytes, @payload : Payload? = nil)
   end
 
