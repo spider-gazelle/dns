@@ -6,17 +6,26 @@ struct DNS::ResourceRecord
   property rdlength : UInt16
   property rdata : Bytes
 
-  alias ParsedData = Hash(String, String | Bool | Int64 | Float64)
+  property payload : Payload?
 
-  property parsed_data : ParsedData?
+  class_getter parsers = Hash(UInt16, Proc(Bytes, Bytes, Payload?)).new
 
-  @@parsers = Hash(UInt16, Proc(Bytes, Bytes, ParsedData?)).new
+  macro register_record(type, parser)
+    {% if type.is_a?(Path) %}
+      %type_code = {{type}}.value
+    {% else %}
+      %type_code = {{type}}
+    {% end %}
+    DNS::ResourceRecord.parsers[%type_code] = Proc(Bytes, Bytes, DNS::ResourceRecord::Payload?).new do |rdata, message|
+      {{parser}}.new(rdata, message)
+    end
+  end
 
-  def self.register_parser(type : UInt16 | RecordCode, &parser : Proc(Bytes, Bytes, ParsedData?))
+  def self.register_record(type : UInt16 | RecordCode, parser : Payload)
     @@parsers[type.is_a?(RecordCode) ? type.value : type] = parser
   end
 
-  def initialize(@name : String, @type : UInt16, @class_code : UInt16, @ttl : UInt32, @rdlength : UInt16, @rdata : Bytes, @data : ParsedData? = nil)
+  def initialize(@name : String, @type : UInt16, @class_code : UInt16, @ttl : UInt32, @rdlength : UInt16, @rdata : Bytes, @payload : Payload? = nil)
   end
 
   def self.from_slice(bytes : Bytes, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
@@ -24,7 +33,7 @@ struct DNS::ResourceRecord
   end
 
   def self.from_io(io : IO::Memory, format : IO::ByteFormat = IO::ByteFormat::BigEndian) : self
-    name = read_labels(io)
+    name = Payload.read_labels(io)
     type = io.read_bytes(UInt16, format)
     class_code = io.read_bytes(UInt16, format)
     ttl = io.read_bytes(UInt32, format)
@@ -37,7 +46,7 @@ struct DNS::ResourceRecord
     new(name, type, class_code, ttl, rdlength, rdata, parsed_data)
   end
 
-  def self.parse_rdata(type : UInt16, rdata : Bytes, message : Bytes) : ParsedData?
+  def self.parse_rdata(type : UInt16, rdata : Bytes, message : Bytes) : Payload?
     if parser = @@parsers[type]?
       parser.call(rdata, message)
     else
@@ -45,39 +54,11 @@ struct DNS::ResourceRecord
     end
   end
 
-  def self.read_labels(io : IO::Memory) : String
-    read_labels(io, io.to_slice)
-  end
-
-  def self.read_labels(io : IO::Memory, message : Bytes) : String
-    labels = [] of String
-    loop do
-      length = io.read_byte
-      break if length.nil?
-      break if length.zero?
-
-      if length & 0xC0 == 0xC0
-        # Pointer
-        pointer = ((length & 0x3F) << 8) | io.read_byte.as(UInt8)
-        labels << get_labels_from_pointer(pointer, message)
-        break
-      else
-        labels << io.read_string(length)
-      end
-    end
-    labels.join(".")
-  end
-
-  def self.get_labels_from_pointer(pointer : UInt16, message : Bytes) : String
-    io = IO::Memory.new(message)
-    io.pos = pointer
-    read_labels(io, message)
-  end
-
   def to_s : String
-    data_str = data ? data.to_s : "Raw Data: #{rdata.hexstring}"
+    data_str = parsed_data ? parsed_data.to_s : "Raw Data: #{rdata.hexstring}"
     "Name: #{name}, Type: #{type}, Class: #{class_code}, TTL: #{ttl}, Data: #{data_str}"
   end
 end
 
+require "./resource_record/payload"
 require "./resource_record/*"

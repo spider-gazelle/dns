@@ -36,7 +36,7 @@ struct DNS::Response
     # Reading the question section
     questions = Array(DNS::Question).new
     qdcount.times do
-      name = DNS::ResourceRecord.read_labels(io)
+      name = DNS::ResourceRecord::Payload.read_labels(io)
       type = io.read_bytes(UInt16, format)
       class_code = io.read_bytes(UInt16, format)
       question = DNS::Question.new(name, type, class_code)
