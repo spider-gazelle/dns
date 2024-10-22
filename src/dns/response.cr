@@ -136,12 +136,18 @@ struct DNS::Response
   end
 
   def raise_on_error!
+    if question = questions.first?
+      message = "querying #{question.qname} for #{DNS::RecordCode.from_value?(question.qtype) || question.qtype}"
+    else
+      message = ""
+    end
+
     case response_code
-    when 1; raise DNS::Response::FormatError.new
-    when 2; raise DNS::Response::ServerError.new
-    when 3; raise DNS::Response::NameError.new
-    when 4; raise DNS::Response::NotImplementedError.new
-    when 5; raise DNS::Response::RefusedError.new
+    when 1; raise DNS::Response::FormatError.new(message)
+    when 2; raise DNS::Response::ServerError.new(message)
+    when 3; raise DNS::Response::NameError.new(message)
+    when 4; raise DNS::Response::NotImplementedError.new(message)
+    when 5; raise DNS::Response::RefusedError.new(message)
     end
   end
 end

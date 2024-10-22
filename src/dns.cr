@@ -140,10 +140,13 @@ module DNS
       queries_to_send.reject!(questions_answered)
 
       resolver.query(domain, dns_server, queries_to_send) do |response|
-        raise DNS::Response::ServerError.new("querying #{dns_server}") if response.server_error?
+        # raise any errors,
+        # ServerError will be handled by moving to the next DNS server, assuming there is one
+        # other errors indicate an issue with the request and will be propagated
+        response.raise_on_error!
         answers.concat response.answers
         questions_answered << response.id
-        cache.store(domain, response) if response.success?
+        cache.store(domain, response)
       end
     end
 

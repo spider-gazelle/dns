@@ -45,6 +45,18 @@ describe DNS do
     response.map(&.to_ip_address).first.is_a?(Socket::IPAddress).should be_true
   end
 
+  it "handles errors when returned from the server" do
+    expect_raises(DNS::Response::NameError, "querying ww1.notexisting12345.com for A") do
+      DNS.query(
+        "ww1.notexisting12345.com",
+        [
+          DNS::RecordCode::A,
+          DNS::RecordCode::AAAA,
+        ]
+      )
+    end
+  end
+
   # note:: mDNS does not work in wsl on Windows
   # it does work when run as a windows application
   it "queries a .local service" do
