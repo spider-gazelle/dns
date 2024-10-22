@@ -3,6 +3,7 @@ require "./spec_helper"
 describe DNS do
   Spec.before_each do
     DNS.cache.clear
+    DNS.default_resolver = DNS::Resolver::UDP.new
   end
 
   it "queries google for A, AAAA and SVCB records" do
@@ -40,6 +41,7 @@ describe DNS do
     response1 = DNS::Response.from_slice bytes1
     response2 = DNS::Response.from_slice bytes2
 
-    response1.answers.first.payload.as(DNS::ResourceRecord::HTTPS).alpn.should eq response2.answers.first.payload.as(DNS::ResourceRecord::HTTPS).alpn
+    response1.answers.first.payload.as(DNS::ResourceRecord::HTTPS).alpn.should eq ["h2", "h3"]
+    response2.answers.first.payload.as(DNS::ResourceRecord::HTTPS).alpn.should eq ["h2", "h3"]
   end
 end
