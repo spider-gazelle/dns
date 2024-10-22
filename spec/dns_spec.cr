@@ -44,4 +44,18 @@ describe DNS do
     response.size.should eq 2
     response.map(&.to_ip_address).first.is_a?(Socket::IPAddress).should be_true
   end
+
+  it "queries a .local service" do
+    pending!("must have a service available locally on the network")
+
+    response = DNS.query(
+      "starling-home-hub.local",
+      [
+        DNS::RecordCode::A,
+        DNS::RecordCode::AAAA,
+      ]
+    )
+
+    response.size.should eq 2
+  end
 end

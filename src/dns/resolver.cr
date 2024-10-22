@@ -89,3 +89,4 @@ abstract class DNS::Resolver
 end
 
 require "./resolver/udp"
+require "./resolver/mdns"

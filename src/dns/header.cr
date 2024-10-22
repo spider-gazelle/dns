@@ -1,13 +1,13 @@
 class DNS::Header
   property id : UInt16
-  property qr : UInt8 = 0
-  property opcode : UInt8 = 0
-  property aa : UInt8 = 0
-  property tc : UInt8 = 0
-  property rd : UInt8 = 1
-  property ra : UInt8 = 0
-  property z : UInt8 = 0
-  property rcode : UInt8 = 0
+  property qr : UInt8 = 0     # query / response flag
+  property opcode : UInt8 = 0 # operation code
+  property aa : UInt8 = 0     # authoritative answer
+  property tc : UInt8 = 0     # truncation
+  property rd : UInt8 = 1     # recursion desired
+  property ra : UInt8 = 0     # recursion available
+  property z : UInt8 = 0      # Reserved
+  property rcode : UInt8 = 0  # Response Code
   property qdcount : UInt16 = 1
   property ancount : UInt16 = 0
   property nscount : UInt16 = 0

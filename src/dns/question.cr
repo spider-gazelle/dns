@@ -18,11 +18,10 @@ class DNS::Question
     io.to_slice
   end
 
-  def self.build_query(domain : String, qtype : UInt16, id : UInt16) : Bytes
+  def self.build_query(domain : String, qtype : UInt16, id : UInt16, qclass : UInt16 = 1_u16) : Bytes
     header = DNS::Header.new(id)
-    question = DNS::Question.new(domain, qtype)
+    question = DNS::Question.new(domain, qtype, qclass)
     header.qdcount = 1_u16
-    query = header.to_slice + question.to_slice
-    query
+    header.to_slice + question.to_slice
   end
 end

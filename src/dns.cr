@@ -7,7 +7,9 @@ module DNS
   class_property timeout : Time::Span = 1.second
   class_property cache : Cache { SimpleCache.new }
   class_property default_resolver : Resolver { Resolver::UDP.new }
-  class_getter resolvers : Hash(Regex, Resolver) = {} of Regex => Resolver
+  class_getter resolvers : Hash(Regex, Resolver) = Hash(Regex, Resolver){
+    /.+\.local$/i => Resolver::MDNS.new,
+  }
 
   enum RecordCode : UInt16
     A          =     1 # Maps a domain name to an IPv4 address
