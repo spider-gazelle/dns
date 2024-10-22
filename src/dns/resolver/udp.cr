@@ -37,7 +37,7 @@ class DNS::Resolver::UDP < DNS::Resolver
 
       # pipeline the requests
       fetch.each do |id, record|
-        query_bytes = DNS.build_query(domain, record, id)
+        query_bytes = DNS::Question.build_query(domain, record, id)
         socket.send(query_bytes)
       end
 

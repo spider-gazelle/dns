@@ -61,14 +61,7 @@ module DNS
     DLV        = 32769 # DNSSEC Lookaside Validation record, used to validate DNSSEC without full chain of trust (deprecated)
   end
 
-  def self.build_query(domain : String, qtype : UInt16, id : UInt16) : Bytes
-    header = DNS::Header.new(id)
-    question = DNS::Question.new(domain, qtype)
-    header.qdcount = 1_u16
-    query = header.to_slice + question.to_slice
-    query
-  end
-
+  # finds the first matching resolver for the domain provided
   def self.select_resolver(domain : String) : Resolver
     resolver = default_resolver
     resolvers.each do |regex, res|
@@ -80,6 +73,7 @@ module DNS
     resolver
   end
 
+  # return the raw DNS responses without processing the answers / using cache
   def self.raw_query(domain : String, query_records : Array(RecordCode | UInt16)) : Array(DNS::Response)
     # select a resolver for this domain (i.e. mDNS for .local domains)
     resolver = select_resolver(domain)
@@ -106,6 +100,7 @@ module DNS
     answers
   end
 
+  # query the DNS records of a domain and return the answers
   def self.query(domain : String, query_records : Array(RecordCode | UInt16)) : Array(DNS::ResourceRecord)
     answers = [] of DNS::ResourceRecord
     query_records = query_records.map { |query| query.is_a?(RecordCode) ? query.value : query }
