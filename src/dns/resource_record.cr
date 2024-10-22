@@ -2,7 +2,7 @@ struct DNS::ResourceRecord
   property name : String
   property type : UInt16
   property class_code : UInt16
-  property ttl : UInt32
+  property ttl : Time::Span
   property rdlength : UInt16
   property rdata : Bytes
 
@@ -21,7 +21,7 @@ struct DNS::ResourceRecord
     end
   end
 
-  def initialize(@name : String, @type : UInt16, @class_code : UInt16, @ttl : UInt32, @rdlength : UInt16, @rdata : Bytes, @payload : Payload? = nil)
+  def initialize(@name : String, @type : UInt16, @class_code : UInt16, @ttl : Time::Span, @rdlength : UInt16, @rdata : Bytes, @payload : Payload? = nil)
   end
 
   def self.from_slice(bytes : Bytes, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
@@ -32,7 +32,7 @@ struct DNS::ResourceRecord
     name = Payload.read_labels(io)
     type = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
     class_code = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
-    ttl = io.read_bytes(UInt32, IO::ByteFormat::BigEndian)
+    ttl = io.read_bytes(UInt32, IO::ByteFormat::BigEndian).seconds
     rdlength = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
     rdata = Bytes.new(rdlength)
     io.read(rdata)

@@ -13,11 +13,13 @@ class DNS::SimpleCache
 
   # check for a cached record
   def lookup(domain : String, query : UInt16) : DNS::ResourceRecord?
+    now = Time.utc
+
     @lock.synchronize do
       if domain_cache = @cache[domain]?
         if entry = domain_cache[query]?
           expiry_time, record = entry
-          if Time.utc < expiry_time
+          if now < expiry_time
             return record
           else
             # Entry expired
@@ -31,7 +33,7 @@ class DNS::SimpleCache
 
   # store a result in the cache
   def store(domain : String, result : DNS::ResourceRecord)
-    expiry_time = result.ttl.seconds.from_now
+    expiry_time = result.ttl.from_now
     @lock.synchronize { @cache[domain][result.type] = {expiry_time, result} }
   end
 
@@ -47,5 +49,9 @@ class DNS::SimpleCache
         records.empty?
       end
     end
+  end
+
+  def clear : Nil
+    @lock.synchronize { @cache.clear }
   end
 end

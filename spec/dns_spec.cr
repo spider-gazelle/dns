@@ -1,6 +1,10 @@
 require "./spec_helper"
 
 describe DNS do
+  Spec.before_each do
+    DNS.cache.clear
+  end
+
   it "queries google for A, AAAA and SVCB records" do
     response = DNS.query(
       "www.google.com",

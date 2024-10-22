@@ -11,6 +11,9 @@ module DNS::Cache
   # cleanup any expired entries
   abstract def cleanup : Nil
 
+  # remove all entries
+  abstract def clear : Nil
+
   def store(domain : String, response : DNS::Response)
     response.answers.each { |answer| store(domain, answer) }
 
