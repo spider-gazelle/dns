@@ -45,6 +45,8 @@ describe DNS do
     response.map(&.to_ip_address).first.is_a?(Socket::IPAddress).should be_true
   end
 
+  # note:: mDNS does not work in wsl on Windows
+  # it does work when run as a windows application
   it "queries a .local service" do
     pending!("must have a service available locally on the network")
 
@@ -56,6 +58,8 @@ describe DNS do
       ]
     )
 
-    response.size.should eq 2
+    # Even though we only queried for A or AAAA the devices
+    # would return both addresses for either query
+    response.size.should eq 4
   end
 end

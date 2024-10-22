@@ -33,7 +33,8 @@ class DNS::Resolver::UDP < DNS::Resolver
 
   # perform the DNS query, fetching using request_id => record_code
   def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Response ->)
-    socket = UDPSocket.new
+    ip = Socket::IPAddress.new(dns_server, port)
+    socket = UDPSocket.new ip.family
 
     begin
       socket.connect(dns_server, port)

@@ -15,6 +15,7 @@ class DNS::Resolver::MDNS < DNS::Resolver
     begin
       # bind to an unused port
       socket.bind(ip.family.inet? ? Socket::IPAddress::UNSPECIFIED : Socket::IPAddress::UNSPECIFIED6, 0)
+      socket.multicast_hops = 255
 
       # give mDNS a little more time to respond (low powered devices)
       socket.read_timeout = DNS.timeout * 1.5
@@ -37,7 +38,7 @@ class DNS::Resolver::MDNS < DNS::Resolver
         dns_response = DNS::Response.from_slice buffer[0, received_length]
 
         # ignore anything we are not expecting
-        if dns_response.answers.any? { |answer| answer.name == domain && answer.type.in?(fetch.values) }
+        if dns_response.answers.any? { |answer| answer.name.downcase == domain.downcase && answer.type.in?(fetch.values) }
           yield dns_response
           responses += 1
           break if responses == fetch.size
