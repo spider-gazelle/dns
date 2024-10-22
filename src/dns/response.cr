@@ -26,19 +26,19 @@ struct DNS::Response
 
   def self.from_io(io : IO, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
     # Extracting the DNS header
-    id = io.read_bytes(UInt16, format)
-    flags = io.read_bytes(UInt16, format)
-    qdcount = io.read_bytes(UInt16, format)
-    ancount = io.read_bytes(UInt16, format)
-    nscount = io.read_bytes(UInt16, format)
-    arcount = io.read_bytes(UInt16, format)
+    id = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
+    flags = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
+    qdcount = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
+    ancount = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
+    nscount = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
+    arcount = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
 
     # Reading the question section
     questions = Array(DNS::Question).new
     qdcount.times do
       name = DNS::ResourceRecord::Payload.read_labels(io)
-      type = io.read_bytes(UInt16, format)
-      class_code = io.read_bytes(UInt16, format)
+      type = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
+      class_code = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
       question = DNS::Question.new(name, type, class_code)
       questions << question
     end
@@ -65,7 +65,7 @@ struct DNS::Response
   end
 
   def self.from_slice(bytes : Bytes, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
-    from_io(IO::Memory.new(bytes), format)
+    from_io(IO::Memory.new(bytes), IO::ByteFormat::BigEndian)
   end
 
   # QR: Query/Response flag

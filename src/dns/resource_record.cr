@@ -30,10 +30,10 @@ struct DNS::ResourceRecord
 
   def self.from_io(io : IO::Memory, format : IO::ByteFormat = IO::ByteFormat::BigEndian) : self
     name = Payload.read_labels(io)
-    type = io.read_bytes(UInt16, format)
-    class_code = io.read_bytes(UInt16, format)
-    ttl = io.read_bytes(UInt32, format)
-    rdlength = io.read_bytes(UInt16, format)
+    type = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
+    class_code = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
+    ttl = io.read_bytes(UInt32, IO::ByteFormat::BigEndian)
+    rdlength = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
     rdata = Bytes.new(rdlength)
     io.read(rdata)
 

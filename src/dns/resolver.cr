@@ -6,6 +6,7 @@ abstract class DNS::Resolver
 
   property failure_limit : Int32 = 3
 
+  # perform the DNS query, fetching using request_id => record_code
   abstract def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Response ->)
 
   # returns the list of DNS servers and their current ordering
@@ -87,4 +88,4 @@ abstract class DNS::Resolver
   end
 end
 
-require "./resolver/*"
+require "./resolver/udp"

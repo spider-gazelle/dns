@@ -1,3 +1,4 @@
+# base class for all record payloads
 abstract struct DNS::ResourceRecord::Payload
   abstract def initialize(rdata : Bytes, message : Bytes)
 

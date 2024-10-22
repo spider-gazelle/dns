@@ -17,17 +17,21 @@ class DNS::Resolver::UDP < DNS::Resolver
 
   class_property fallback_servers : Array(String) { ["1.1.1.1", "8.8.8.8"] }
 
+  # provide your own server list
   def initialize(@servers : Array(String), @port : UInt16 = 53_u16)
   end
 
+  # attempts to use system server list or fallback servers if unavailable
   def initialize(@port : UInt16 = 53_u16)
     servers = self.class.system_servers
     servers = self.class.fallback_servers if servers.empty?
     @servers = servers
   end
 
+  # port to make the DNS query on, defaults to 53
   property port : UInt16
 
+  # perform the DNS query, fetching using request_id => record_code
   def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Response ->)
     socket = UDPSocket.new
 
