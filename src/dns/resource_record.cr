@@ -54,6 +54,23 @@ struct DNS::ResourceRecord
     data_str = parsed_data ? parsed_data.to_s : "Raw Data: #{rdata.hexstring}"
     "Name: #{name}, Type: #{type}, Class: #{class_code}, TTL: #{ttl}, Data: #{data_str}"
   end
+
+  def record_code : RecordCode
+    RecordCode.from_value type
+  end
+
+  # a helper for obtaining IP addresses
+  def to_ip_address(port = 0) : Socket::IPAddress
+    code = record_code
+    case code
+    when .a?
+      Socket::IPAddress.new(payload.as(ResourceRecord::A).address, port)
+    when .aaaa?
+      Socket::IPAddress.new(payload.as(ResourceRecord::AAAA).address, port)
+    else
+      raise "record #{code} is not an IP Address"
+    end
+  end
 end
 
 require "./resource_record/payload"

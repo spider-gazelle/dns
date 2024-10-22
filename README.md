@@ -19,14 +19,16 @@ Non-blocking extensible DNS client for crystal lang
 ```crystal
 require "dns"
 
-response = DNS.query(
+responses = DNS.query(
   "www.google.com",
   [
     DNS::RecordCode::A,
     DNS::RecordCode::AAAA,
-    DNS::RecordCode::HTTPS,
   ]
 )
+
+ips = responses.map(&.to_ip_address)
+
 ```
 
 ## Contributing
