@@ -2,7 +2,7 @@
 
 Non-blocking extendable DNS client for crystal lang.
 
-Supports UDP, HTTPS and mDNS queries
+With built in support for UDP, HTTPS and mDNS resolvers
 
 ## Installation
 
