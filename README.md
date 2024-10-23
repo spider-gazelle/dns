@@ -44,7 +44,7 @@ require "dns/resolver/https"
 DNS.default_resolver = DNS::Resolver::HTTPS.new(["https://1.1.1.1/dns-query"])
 
 # or just for some routes
-DNS.resolvers[/.+\.com.au$/i] = DNS::Resolver::HTTPS.new(["https://1.1.1.1/dns-query"])
+DNS.resolvers[/.+\.com\.au$/i] = DNS::Resolver::HTTPS.new(["https://1.1.1.1/dns-query"])
 
 # there is a built in resolver to use mDNS for *.local routes
 
