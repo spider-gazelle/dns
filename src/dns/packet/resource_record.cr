@@ -67,7 +67,7 @@ struct DNS::Packet::ResourceRecord
   end
 
   # a helper for obtaining IP addresses
-  def to_ip_address(port = 0) : Socket::IPAddress
+  def ip_address(port = 0) : Socket::IPAddress
     code = record_code
     case code
     when .a?

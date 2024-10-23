@@ -1,6 +1,8 @@
 # DNS
 
-Non-blocking extensible DNS client for crystal lang
+Non-blocking extendable DNS client for crystal lang.
+
+Supports UDP, HTTPS and mDNS queries
 
 ## Installation
 
@@ -16,6 +18,8 @@ Non-blocking extensible DNS client for crystal lang
 
 ## Usage
 
+A simple query
+
 ```crystal
 require "dns"
 
@@ -27,7 +31,22 @@ responses = DNS.query(
   ]
 )
 
-ips = responses.map(&.to_ip_address)
+ips = responses.map(&.ip_address)
+
+```
+
+Configure for HTTPS DNS (secure from prying eyes)
+
+```crystal
+require "dns"
+require "dns/resolver/https"
+
+DNS.default_resolver = DNS::Resolver::HTTPS.new(["https://1.1.1.1/dns-query"])
+
+# or just for some routes
+DNS.resolvers[/.+\.com.au$/i] = DNS::Resolver::HTTPS.new(["https://1.1.1.1/dns-query"])
+
+# there is a built in resolver to use mDNS for *.local routes
 
 ```
 

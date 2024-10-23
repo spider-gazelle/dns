@@ -30,6 +30,17 @@ describe DNS do
     response.size.should eq 3
   end
 
+  it "queries google for MX records and caches additional IP addresses" do
+    response = DNS.query(
+      "proton.me",
+      [
+        DNS::RecordCode::MX,
+      ]
+    )
+
+    response.size.should eq 2
+  end
+
   it "queries google using HTTPS resolver" do
     DNS.default_resolver = DNS::Resolver::HTTPS.new(["https://1.1.1.1/dns-query"])
 
@@ -42,7 +53,7 @@ describe DNS do
     )
 
     response.size.should eq 2
-    response.map(&.to_ip_address).first.is_a?(Socket::IPAddress).should be_true
+    response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
   end
 
   it "handles errors when returned from the server" do
