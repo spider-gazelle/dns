@@ -52,7 +52,7 @@ class DNS::Resolver::UDP < DNS::Resolver
       responses = 0
       loop do
         received_length, _ip_address = socket.receive buffer
-        raise IO::Error.new("mDNS query failed, zero bytes received") if received_length.zero?
+        raise IO::Error.new("DNS query failed, zero bytes received") if received_length.zero?
         dns_response = DNS::Packet.from_slice buffer[0, received_length]
 
         # ignore anything we are not expecting
