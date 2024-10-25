@@ -1,5 +1,9 @@
 module DNS
-  struct Resource::OPT < Resource
+  struct Resource::OPT
+    include Resource
+
+    RECORD_TYPE = 41_u16
+
     getter ecs_family : UInt16? = nil
     getter ecs_source_prefix_length : UInt8? = nil
     getter ecs_scope_prefix_length : UInt8? = nil
@@ -77,6 +81,4 @@ module DNS
       end
     end
   end
-
-  Resource.register_record(RecordType::OPT, Resource::OPT)
 end

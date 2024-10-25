@@ -1,5 +1,9 @@
 module DNS
-  struct Resource::A < Resource
+  struct Resource::A
+    include Resource
+
+    RECORD_TYPE = 1_u16
+
     getter address : String
 
     def initialize(resource_data : Bytes, message : Bytes)
@@ -10,6 +14,4 @@ module DNS
       Socket::IPAddress.new(address, port)
     end
   end
-
-  Resource.register_record(RecordType::A, Resource::A)
 end

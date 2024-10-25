@@ -32,7 +32,8 @@ class DNS::HashCache
   end
 
   # store a result in the cache
-  def store(domain : String, result : DNS::Packet::ResourceRecord)
+  def store(domain : String, result : DNS::Packet::ResourceRecord) : Nil
+    return if result.ttl.zero?
     expiry_time = result.ttl.from_now
     @lock.synchronize { @cache[domain][result.type] = {expiry_time, result} }
   end

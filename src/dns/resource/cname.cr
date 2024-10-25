@@ -1,6 +1,10 @@
 module DNS
   # CNAME record parsing
-  struct Resource::CNAME < Resource
+  struct Resource::CNAME
+    include Resource
+
+    RECORD_TYPE = 5_u16
+
     getter target : String
 
     def initialize(resource_data : Bytes, message : Bytes)
@@ -8,6 +12,4 @@ module DNS
       @target = Resource.read_labels(IO::Memory.new(resource_data), message)
     end
   end
-
-  Resource.register_record(RecordType::CNAME, Resource::CNAME)
 end

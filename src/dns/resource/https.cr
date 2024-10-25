@@ -1,6 +1,10 @@
 module DNS
   # HTTPS record parsing
-  struct Resource::HTTPS < Resource
+  struct Resource::HTTPS
+    include Resource
+
+    RECORD_TYPE = 65_u16
+
     getter priority : UInt16
     getter target_name : String
     getter alpn : Array(String)
@@ -34,6 +38,4 @@ module DNS
       end
     end
   end
-
-  Resource.register_record(RecordType::HTTPS, Resource::HTTPS)
 end

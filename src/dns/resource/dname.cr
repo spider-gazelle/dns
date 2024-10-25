@@ -1,6 +1,10 @@
 module DNS
-  # DNAME record parsing
-  struct Resource::DNAME < Resource
+  # Delegation Name record, aliases an entire subtree of the domain name space to another domain
+  struct Resource::DNAME
+    include Resource
+
+    RECORD_TYPE = 39_u16
+
     getter target : String
 
     def initialize(resource_data : Bytes, message : Bytes)
@@ -8,6 +12,4 @@ module DNS
       @target = Resource.read_labels(IO::Memory.new(resource_data), message)
     end
   end
-
-  Resource.register_record(RecordType::DNAME, Resource::DNAME)
 end

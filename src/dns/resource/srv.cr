@@ -1,6 +1,10 @@
 module DNS
   # SRV record parsing
-  struct Resource::SRV < Resource
+  struct Resource::SRV
+    include Resource
+
+    RECORD_TYPE = 33_u16
+
     getter priority : UInt16 # Priority of the target host
     getter weight : UInt16   # Relative weight for records with the same priority
     getter port : UInt16     # Port on which the service is running
@@ -22,6 +26,4 @@ module DNS
       @target = Resource.read_labels(io, message)
     end
   end
-
-  Resource.register_record(RecordType::SRV, Resource::SRV)
 end

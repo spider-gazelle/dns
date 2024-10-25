@@ -1,6 +1,10 @@
 module DNS
   # PTR record parsing
-  struct Resource::PTR < Resource
+  struct Resource::PTR
+    include Resource
+
+    RECORD_TYPE = 12_u16
+
     getter domain_name : String
 
     def initialize(resource_data : Bytes, message : Bytes)
@@ -8,6 +12,4 @@ module DNS
       @domain_name = Resource.read_labels(IO::Memory.new(resource_data), message)
     end
   end
-
-  Resource.register_record(RecordType::PTR, Resource::PTR)
 end

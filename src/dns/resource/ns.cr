@@ -1,6 +1,10 @@
 module DNS
   # NS record parsing
-  struct Resource::NS < Resource
+  struct Resource::NS
+    include Resource
+
+    RECORD_TYPE = 2_u16
+
     getter name_server : String
 
     def initialize(resource_data : Bytes, message : Bytes)
@@ -8,6 +12,4 @@ module DNS
       @name_server = Resource.read_labels(IO::Memory.new(resource_data), message)
     end
   end
-
-  Resource.register_record(RecordType::NS, Resource::NS)
 end

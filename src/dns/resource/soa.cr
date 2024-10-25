@@ -1,6 +1,10 @@
 module DNS
   # SOA record parsing
-  struct Resource::SOA < Resource
+  struct Resource::SOA
+    include Resource
+
+    RECORD_TYPE = 6_u16
+
     getter primary_ns : String      # Primary name server for the domain
     getter admin_email : String     # Email of the administrator (encoded as a domain)
     getter serial : UInt32          # Serial number for the zone
@@ -26,6 +30,4 @@ module DNS
       @minimum_ttl = io.read_bytes(UInt32, IO::ByteFormat::BigEndian).seconds
     end
   end
-
-  Resource.register_record(RecordType::SOA, Resource::SOA)
 end

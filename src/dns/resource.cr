@@ -1,11 +1,33 @@
-# base class for all record resources
-abstract struct DNS::Resource
+# record resources must be of this type
+module DNS::Resource
   abstract def initialize(resource_data : Bytes, message : Bytes)
 
+  # :nodoc:
+  RESOURCE_STRUCTS = [] of Nil
+
+  macro included
+    {% RESOURCE_STRUCTS << @type %}
+  end
+
+  macro finished
+    # :nodoc:
+    LOOKUP = {
+      {% for resource in RESOURCE_STRUCTS %}
+        {% type_code = resource.constant("RECORD_TYPE") %}
+        {% raise("#{resource.name} must define RECORD_TYPE") unless type_code %}
+        {{type_code}} => {{resource.name.id}},
+      {% end %}
+    }
+  end
+
+  # decompress a DNS name starting from the current position an IO::Memory
   def self.read_labels(io : IO::Memory) : String
     read_labels(io, io.to_slice)
   end
 
+  # decompress a DNS name starting from the current position an IO::Memory
+  # the entire message must be provided in case this is a pointer to another
+  # point in the complete message
   def self.read_labels(io : IO::Memory, message : Bytes) : String
     labels = [] of String
     loop do
@@ -25,23 +47,11 @@ abstract struct DNS::Resource
     labels.join(".")
   end
 
+  # :nodoc:
   def self.get_labels_from_pointer(pointer : UInt16, message : Bytes) : String
     io = IO::Memory.new(message)
     io.pos = pointer
     read_labels(io, message)
-  end
-
-  class_getter parsers = Hash(UInt16, Proc(Bytes, Bytes, Resource?)).new
-
-  macro register_record(type, parser)
-    {% if type.is_a?(Path) %}
-      %type_code = {{type}}.value
-    {% else %}
-      %type_code = {{type}}
-    {% end %}
-    DNS::Resource.parsers[%type_code] = Proc(Bytes, Bytes, DNS::Resource?).new do |resource_data, message|
-      {{parser}}.new(resource_data, message)
-    end
   end
 end
 

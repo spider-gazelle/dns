@@ -25,9 +25,8 @@ struct DNS::Packet::ResourceRecord
     resource_data = Bytes.new(rdlength)
     io.read(resource_data)
 
-    parsed_data = parse_resource_data(type, resource_data, io.to_slice)
-
-    new(name, type, class_code, ttl, resource_data, parsed_data)
+    resource = DNS::Resource::LOOKUP[type]?.try(&.new(resource_data, io.to_slice))
+    new(name, type, class_code, ttl, resource_data, resource)
   end
 
   def to_slice : Bytes
@@ -47,14 +46,6 @@ struct DNS::Packet::ResourceRecord
     io.write_bytes(ttl.total_seconds.to_u32, IO::ByteFormat::BigEndian)
     io.write_bytes(resource_data.size.to_u16, IO::ByteFormat::BigEndian)
     io.write(resource_data)
-  end
-
-  def self.parse_resource_data(type : UInt16, resource_data : Bytes, message : Bytes) : Resource?
-    if parser = DNS::Resource.parsers[type]?
-      parser.call(resource_data, message)
-    else
-      nil
-    end
   end
 
   def to_s : String

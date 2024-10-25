@@ -1,5 +1,9 @@
 module DNS
-  struct Resource::AAAA < Resource
+  struct Resource::AAAA
+    include Resource
+
+    RECORD_TYPE = 28_u16
+
     getter address : String
 
     def initialize(resource_data : Bytes, message : Bytes)
@@ -31,6 +35,4 @@ module DNS
       groups.map(&.rjust(4, '0')).join(':')
     end
   end
-
-  Resource.register_record(RecordType::AAAA, Resource::AAAA)
 end

@@ -1,6 +1,10 @@
 module DNS
   # TXT record parsing
-  struct Resource::TXT < Resource
+  struct Resource::TXT
+    include Resource
+
+    RECORD_TYPE = 16_u16
+
     getter text_data : Array(String) # Array of strings as multiple TXT records can exist
 
     def initialize(resource_data : Bytes, message : Bytes)
@@ -14,6 +18,4 @@ module DNS
       end
     end
   end
-
-  Resource.register_record(RecordType::TXT, Resource::TXT)
 end

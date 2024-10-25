@@ -3,10 +3,10 @@ require "./packet"
 # an interface for caching DNS entries up to TTL
 module DNS::Cache
   # check for a cached record
-  abstract def lookup(domain : String, query : Query) : DNS::Packet::ResourceRecord?
+  abstract def lookup(domain : String, query : UInt16) : DNS::Packet::ResourceRecord?
 
   # store a result in the cache
-  abstract def store(domain : String, result : DNS::Packet::ResourceRecord)
+  abstract def store(domain : String, result : DNS::Packet::ResourceRecord) : Nil
 
   # cleanup any expired entries
   abstract def cleanup : Nil

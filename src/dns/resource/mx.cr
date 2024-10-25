@@ -1,6 +1,10 @@
 module DNS
   # MX record parsing
-  struct Resource::MX < Resource
+  struct Resource::MX
+    include Resource
+
+    RECORD_TYPE = 15_u16
+
     getter preference : UInt16
     getter exchange : String
 
@@ -14,6 +18,4 @@ module DNS
       @exchange = Resource.read_labels(io, message)
     end
   end
-
-  Resource.register_record(RecordType::MX, Resource::MX)
 end
