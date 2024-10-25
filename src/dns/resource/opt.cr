@@ -78,5 +78,5 @@ module DNS
     end
   end
 
-  Resource.register_record(RecordCode::OPT, Resource::OPT)
+  Resource.register_record(RecordType::OPT, Resource::OPT)
 end

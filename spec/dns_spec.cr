@@ -21,20 +21,20 @@ describe DNS do
     response = DNS.query(
       "www.google.com",
       [
-        DNS::RecordCode::A,
-        DNS::RecordCode::AAAA,
-        DNS::RecordCode::HTTPS,
+        DNS::RecordType::A,
+        DNS::RecordType::AAAA,
+        DNS::RecordType::HTTPS,
       ]
     )
 
     response.size.should eq 3
   end
 
-  it "queries google for MX records and caches additional IP addresses" do
+  it "queries for MX records and caches additional IP addresses" do
     response = DNS.query(
       "proton.me",
       [
-        DNS::RecordCode::MX,
+        DNS::RecordType::MX,
       ]
     )
 
@@ -47,8 +47,8 @@ describe DNS do
     response = DNS.query(
       "www.google.com",
       [
-        DNS::RecordCode::A,
-        DNS::RecordCode::AAAA,
+        DNS::RecordType::A,
+        DNS::RecordType::AAAA,
       ]
     )
 
@@ -61,11 +61,27 @@ describe DNS do
       DNS.query(
         "ww1.notexisting12345.com",
         [
-          DNS::RecordCode::A,
-          DNS::RecordCode::AAAA,
+          DNS::RecordType::A,
+          DNS::RecordType::AAAA,
         ]
       )
     end
+  end
+
+  it "can perform IPv4 reverse lookups" do
+    responses = DNS.query("gmail.com", [DNS::RecordType::A])
+    ip = responses.find!(&.record_type.a?).ip_address
+
+    reverse_domains = DNS.reverse_lookup ip
+    reverse_domains.size.should be > 0
+  end
+
+  it "can perform IPv6 reverse lookups" do
+    responses = DNS.query("gmail.com", [DNS::RecordType::AAAA])
+    ip = responses.find!(&.record_type.aaaa?).ip_address
+
+    reverse_domains = DNS.reverse_lookup ip
+    reverse_domains.size.should be > 0
   end
 
   # note:: mDNS does not work in wsl on Windows
@@ -76,8 +92,8 @@ describe DNS do
     response = DNS.query(
       "starling-home-hub.local",
       [
-        DNS::RecordCode::A,
-        DNS::RecordCode::AAAA,
+        DNS::RecordType::A,
+        DNS::RecordType::AAAA,
       ]
     )
 

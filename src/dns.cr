@@ -5,20 +5,28 @@ module DNS
   {% end %}
 
   class_property timeout : Time::Span = 1.second
-  class_property cache : Cache { SimpleCache.new }
+  class_property cache : Cache { HashCache.new }
   class_property default_resolver : Resolver { Resolver::UDP.new }
   class_getter resolvers : Hash(Regex, Resolver) = Hash(Regex, Resolver){
     /.+\.local$/i => Resolver::MDNS.new,
   }
 
-  # Opcode: Specifies the kind of query in this message.
+  # Specifies the kind of query in this message.
   enum OpCode : UInt8
     QUERY  = 0 # a standard query
-    IQUERY = 1 # an inverse query
+    IQUERY = 1 # an inverse query, deprecated, use PTR instead
     STATUS = 2 # a server status request
   end
 
-  enum RecordCode : UInt16
+  enum ClassCode : UInt16
+    Internet =   1
+    Chaos    =   3 # Chaosnet developed at MIT in the 1970s for their AI Lab
+    Hesiod   =   4 # MIT's Athena project
+    NONE     = 254 # used to indicate that a specific record should be deleted
+    ANY      = 255 # retrieves all the available record types for a given name
+  end
+
+  enum RecordType : UInt16
     A          =     1 # Maps a domain name to an IPv4 address
     NS         =     2 # Name Server record, indicates authoritative DNS servers for the domain
     CNAME      =     5 # Canonical Name record, aliases one domain name to another
@@ -82,37 +90,10 @@ module DNS
     resolver
   end
 
-  # return the raw DNS responses without processing the answers / using cache
-  def self.raw_query(domain : String, query_records : Array(RecordCode | UInt16)) : Array(DNS::Packet)
-    # select a resolver for this domain (i.e. mDNS for .local domains)
-    resolver = select_resolver(domain)
-
-    # generate request ids
-    query_records = query_records.map { |query| query.is_a?(RecordCode) ? query.value : query }
-    queries_to_send = Hash(UInt16, UInt16).new(0_u16, query_records.size)
-    query_records.each do |query|
-      # find a unique id for this request
-      query_id = rand(UInt16::MAX)
-      loop do
-        break if queries_to_send[query_id]?.nil?
-        query_id = rand(UInt16::MAX)
-      end
-      queries_to_send[query_id] = query
-    end
-
-    answers = [] of DNS::Packet
-    resolver.select_server do |dns_server|
-      resolver.query(domain, dns_server, queries_to_send) do |response|
-        answers << response
-      end
-    end
-    answers
-  end
-
   # query the DNS records of a domain and return the answers
-  def self.query(domain : String, query_records : Array(RecordCode | UInt16)) : Array(DNS::Packet::ResourceRecord)
+  def self.query(domain : String, query_records : Array(RecordType | UInt16)) : Array(DNS::Packet::ResourceRecord)
     answers = [] of DNS::Packet::ResourceRecord
-    query_records = query_records.map { |query| query.is_a?(RecordCode) ? query.value : query }
+    query_records = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }
 
     # Check cache and collect the queries we need to transmit
     queries_to_send = {} of UInt16 => UInt16
@@ -158,6 +139,27 @@ module DNS
     end
 
     answers
+  end
+
+  def self.reverse_lookup(ip : Socket::IPAddress) : Array(String)
+    ptr = case ip.family
+          in .inet?
+            # Build IPv4 PTR DNS domain, e.g. "192.0.2.1" => "1.2.0.192.in-addr.arpa"
+            octets = ip.address.split('.')
+            "#{octets.reverse.join(".")}.in-addr.arpa"
+          in .inet6?
+            address = Resource::AAAA.expand_ipv6(ip)
+            reversed_nibbles = address.gsub(":", "").chars.reverse!
+            "#{reversed_nibbles.join(".")}.ip6.arpa"
+          in .unix?, .unspec?
+            raise ArgumentError.new("IPAddress must be one of INET or INET6, not #{ip.family}")
+          end
+
+    query(ptr, [RecordType::PTR]).compact_map do |answer|
+      if answer.record_type.ptr?
+        answer.resource.as(Resource::PTR).domain_name
+      end
+    end
   end
 end
 

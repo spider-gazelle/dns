@@ -27,5 +27,5 @@ module DNS
     end
   end
 
-  Resource.register_record(RecordCode::SOA, Resource::SOA)
+  Resource.register_record(RecordType::SOA, Resource::SOA)
 end

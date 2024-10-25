@@ -8,7 +8,7 @@ class DNS::Resolver::HTTPS < DNS::Resolver
   # Optionally, allow custom TLS context
   property tls_context : OpenSSL::SSL::Context::Client?
 
-  # Perform the DNS query, fetching using request_id => record_code
+  # Perform the DNS query, fetching using request_id => record_type
   def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
     uri = URI.parse(dns_server)
     client = HTTP::Client.new(uri, tls: @tls_context)

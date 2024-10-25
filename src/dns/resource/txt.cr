@@ -15,5 +15,5 @@ module DNS
     end
   end
 
-  Resource.register_record(RecordCode::TXT, Resource::TXT)
+  Resource.register_record(RecordType::TXT, Resource::TXT)
 end

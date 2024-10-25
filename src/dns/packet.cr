@@ -154,7 +154,7 @@ struct DNS::Packet
 
   def raise_on_error!
     if question = questions.first?
-      message = "querying #{question.name} for #{DNS::RecordCode.from_value?(question.type) || question.type}"
+      message = "querying #{question.name} for #{DNS::RecordType.from_value?(question.type) || question.type}"
     else
       message = ""
     end

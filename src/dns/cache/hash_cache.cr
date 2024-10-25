@@ -1,6 +1,6 @@
 require "../cache"
 
-class DNS::SimpleCache
+class DNS::HashCache
   include Cache
 
   @lock : Mutex = Mutex.new

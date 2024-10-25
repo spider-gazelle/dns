@@ -7,7 +7,7 @@ struct DNS::Packet::ResourceRecord
   property ttl : Time::Span
   property resource_data : Bytes
 
-  property resource : Resource?
+  getter resource : Resource?
 
   def initialize(@name : String, @type : UInt16, @class_code : UInt16, @ttl : Time::Span, @resource_data : Bytes, @resource : Resource? = nil)
   end
@@ -62,20 +62,40 @@ struct DNS::Packet::ResourceRecord
     "Name: #{name}, Type: #{type}, Class: #{class_code}, TTL: #{ttl}, Data: #{data_str}"
   end
 
-  def record_code : RecordCode
-    RecordCode.from_value type
+  def record_type : RecordType
+    RecordType.from_value type
   end
 
   # a helper for obtaining IP addresses
   def ip_address(port = 0) : Socket::IPAddress
-    code = record_code
+    code = record_type
     case code
     when .a?
-      Socket::IPAddress.new(resource.as(Resource::A).address, port)
+      resource.as(Resource::A).to_ip port
     when .aaaa?
-      Socket::IPAddress.new(resource.as(Resource::AAAA).address, port)
+      resource.as(Resource::AAAA).to_ip port
     else
       raise "record #{code} is not an IP Address"
     end
+  end
+
+  # a helper for obtaining a cname target
+  def cname : String
+    resource.as(Resource::CNAME).target
+  end
+
+  # a helper for obtaining a dname target
+  def dname : String
+    resource.as(Resource::DNAME).target
+  end
+
+  # a helper for obtaining a name server
+  def name_server : String
+    resource.as(Resource::NS).name_server
+  end
+
+  # a helper for obtaining TXT record data
+  def text_data : String
+    resource.as(Resource::TXT).text_data
   end
 end

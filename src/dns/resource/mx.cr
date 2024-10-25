@@ -15,5 +15,5 @@ module DNS
     end
   end
 
-  Resource.register_record(RecordCode::MX, Resource::MX)
+  Resource.register_record(RecordType::MX, Resource::MX)
 end

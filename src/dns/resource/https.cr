@@ -35,5 +35,5 @@ module DNS
     end
   end
 
-  Resource.register_record(RecordCode::HTTPS, Resource::HTTPS)
+  Resource.register_record(RecordType::HTTPS, Resource::HTTPS)
 end

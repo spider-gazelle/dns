@@ -23,5 +23,5 @@ module DNS
     end
   end
 
-  Resource.register_record(RecordCode::SRV, Resource::SRV)
+  Resource.register_record(RecordType::SRV, Resource::SRV)
 end

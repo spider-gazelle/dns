@@ -9,5 +9,5 @@ module DNS
     end
   end
 
-  Resource.register_record(RecordCode::NS, Resource::NS)
+  Resource.register_record(RecordType::NS, Resource::NS)
 end

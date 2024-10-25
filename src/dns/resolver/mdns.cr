@@ -7,7 +7,7 @@ class DNS::Resolver::MDNS < DNS::Resolver
   # port to make the DNS query on, defaults to 53
   property port : UInt16
 
-  # perform the DNS query, fetching using request_id => record_code
+  # perform the DNS query, fetching using request_id => record_type
   def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
     ip = Socket::IPAddress.new(dns_server, port)
     socket = UDPSocket.new ip.family
