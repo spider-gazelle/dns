@@ -57,7 +57,7 @@ describe DNS do
   end
 
   it "handles errors when returned from the server" do
-    expect_raises(DNS::Packet::NameError, "querying ww1.notexisting12345.com for A") do
+    expect_raises(DNS::Packet::NameError, "Hostname lookup for ww1.notexisting12345.com failed") do
       DNS.query(
         "ww1.notexisting12345.com",
         [
@@ -100,5 +100,40 @@ describe DNS do
     # Even though we only queried for A or AAAA the devices
     # would return both addresses for either query
     response.size.should eq 4
+  end
+
+  it "works with system addrinfo resolution" do
+    DNS.default_resolver = DNS::Resolver::System.new
+
+    # supported records
+    response = DNS.query(
+      "www.google.com",
+      [
+        DNS::RecordType::A,
+        DNS::RecordType::AAAA,
+      ]
+    )
+    response.size.should eq 2
+    response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
+
+    # compatible errors
+    expect_raises(DNS::Packet::NameError, /Hostname lookup for ww1.notexisting12345.com failed/) do
+      DNS.query(
+        "ww1.notexisting12345.com",
+        [
+          DNS::RecordType::A,
+          DNS::RecordType::AAAA,
+        ]
+      )
+    end
+
+    # fallback for other records
+    response = DNS.query(
+      "proton.me",
+      [
+        DNS::RecordType::MX,
+      ]
+    )
+    response.size.should eq 2
   end
 end

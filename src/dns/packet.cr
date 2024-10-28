@@ -154,9 +154,9 @@ struct DNS::Packet
 
   def raise_on_error!
     if question = questions.first?
-      message = "querying #{question.name} for #{DNS::RecordType.from_value?(question.type) || question.type}"
+      message = "Hostname lookup for #{question.name} failed"
     else
-      message = ""
+      message = "Hostname lookup failed"
     end
 
     case response_code

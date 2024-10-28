@@ -6,6 +6,9 @@ module DNS
 
     getter address : String
 
+    def initialize(@address)
+    end
+
     def initialize(resource_data : Bytes, message : Bytes)
       @address = resource_data.each_slice(2).map { |bytes|
         ((bytes[0].to_u16 << 8) | bytes[1].to_u16).to_s(16)

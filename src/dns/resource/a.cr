@@ -6,6 +6,9 @@ module DNS
 
     getter address : String
 
+    def initialize(@address)
+    end
+
     def initialize(resource_data : Bytes, message : Bytes)
       @address = resource_data.map(&.to_s).join(".")
     end

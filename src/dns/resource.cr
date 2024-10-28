@@ -7,6 +7,12 @@ module DNS::Resource
 
   macro included
     {% RESOURCE_STRUCTS << @type %}
+
+    macro finished
+      def record_type
+        RECORD_TYPE
+      end
+    end
   end
 
   macro finished

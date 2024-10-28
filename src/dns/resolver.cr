@@ -90,3 +90,4 @@ end
 
 require "./resolver/udp"
 require "./resolver/mdns"
+require "./resolver/system"
