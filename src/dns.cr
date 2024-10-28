@@ -91,9 +91,11 @@ module DNS
   end
 
   # query the DNS records of a domain and return the answers
-  def self.query(domain : String, query_records : Array(RecordType | UInt16)) : Array(DNS::Packet::ResourceRecord)
-    answers = [] of DNS::Packet::ResourceRecord
-    query_records = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }
+  #
+  # NOTE:: A or AAAA answers may include cname and other records that are not directly relevent to the query.
+  # It is up to the consumer to filter for the relevant results
+  def self.query(domain : String, query_records : Array(RecordType | UInt16), &) : Nil
+    query_records = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }.uniq!
 
     # Check cache and collect the queries we need to transmit
     queries_to_send = {} of UInt16 => UInt16
@@ -101,7 +103,7 @@ module DNS
     query_records.each do |query|
       cached_record = cache_local.lookup(domain, query)
       if cached_record
-        answers << cached_record
+        yield cached_record
         next
       end
 
@@ -115,7 +117,7 @@ module DNS
     end
 
     # return if all queries are answered from cache
-    return answers if queries_to_send.empty?
+    return if queries_to_send.empty?
 
     # select a resolver for this domain (i.e. mDNS for .local domains)
     resolver = select_resolver(domain)
@@ -132,12 +134,21 @@ module DNS
         # ServerError will be handled by moving to the next DNS server, assuming there is one
         # other errors indicate an issue with the request and will be propagated
         response.raise_on_error!
-        answers.concat response.answers
         questions_answered << response.id
-        cache.store(domain, response)
+        cache.store(domain, response) rescue nil
+        response.answers.each do |answer|
+          yield answer
+        end
       end
     end
+  end
 
+  # :ditto:
+  def self.query(domain : String, query_records : Array(RecordType | UInt16)) : Array(DNS::Packet::ResourceRecord)
+    answers = Array(DNS::Packet::ResourceRecord).new(query_records.size)
+    query(domain, query_records) do |answer|
+      answers << answer
+    end
     answers
   end
 
