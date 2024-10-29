@@ -15,6 +15,7 @@ class DNS::Resolver::System < DNS::Resolver
 
   # Perform the DNS query, fetching using request_id => record_type
   def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
+    # split out A and AAAA requests for processing seperately
     fallback_fetch = nil
     fetch.select! do |req_id, record_type|
       next true if record_type.in?({A, AAAA})
@@ -38,15 +39,16 @@ class DNS::Resolver::System < DNS::Resolver
       raise DNS::Packet::NameError.new(ex.message, cause: ex)
     end
 
+    # dress the results up as a DNS response
     unless system_results.empty?
       records = system_results.map do |addrinfo|
         resource = case addrinfo.family
-                   in .inet6?
-                     Resource::AAAA.new(addrinfo.ip_address.address)
                    in .inet?
                      Resource::A.new(addrinfo.ip_address.address)
+                   in .inet6?
+                     Resource::AAAA.new(addrinfo.ip_address.address)
                    in .unix?, .unspec?
-                     raise ArgumentError.new("unexpected Addrinfo#family #{addrinfo.family}")
+                     raise ArgumentError.new("unexpected Addrinfo#family response #{addrinfo.family}")
                    end
 
         Packet::ResourceRecord.new(domain, resource.record_type, ClassCode::Internet.value, 0.seconds, BLANK, resource)
@@ -55,6 +57,7 @@ class DNS::Resolver::System < DNS::Resolver
       yield DNS::Packet.new(id: 0_u16, response: true, answers: records)
     end
 
+    # perform any other queries
     if fallback_fetch
       fallback.query(domain, dns_server, fallback_fetch) do |packet|
         yield packet

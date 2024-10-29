@@ -17,7 +17,7 @@ describe DNS do
     response2.answers.first.resource.as(DNS::Resource::HTTPS).alpn.should eq ["h2", "h3"]
   end
 
-  it "queries google for A, AAAA and SVCB records" do
+  it "queries for A, AAAA and SVCB records" do
     response = DNS.query(
       "www.google.com",
       [
@@ -41,8 +41,25 @@ describe DNS do
     response.size.should eq 2
   end
 
-  it "queries google using HTTPS resolver" do
+  it "queries using HTTPS resolver" do
     DNS.default_resolver = DNS::Resolver::HTTPS.new(["https://1.1.1.1/dns-query"])
+
+    response = DNS.query(
+      "www.google.com",
+      [
+        DNS::RecordType::A,
+        DNS::RecordType::AAAA,
+      ]
+    )
+
+    response.size.should eq 2
+    response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
+  end
+
+  it "queries using TLS resolver" do
+    DNS.default_resolver = DNS::Resolver::TLS.new({
+      "8.8.8.8" => "dns.google",
+    })
 
     response = DNS.query(
       "www.google.com",
