@@ -5,7 +5,7 @@ module DNS
   {% end %}
 
   class_property timeout : Time::Span = 1.second
-  class_property cache : Cache { HashCache.new }
+  class_property cache : Cache { Cache::HashMap.new }
   class_property default_resolver : Resolver { Resolver::UDP.new }
   class_getter resolvers : Hash(Regex, Resolver) = Hash(Regex, Resolver){
     /.+\.local$/i => Resolver::MDNS.new,
@@ -95,6 +95,7 @@ module DNS
   # NOTE:: A or AAAA answers may include cname and other records that are not directly relevent to the query.
   # It is up to the consumer to filter for the relevant results
   def self.query(domain : String, query_records : Array(RecordType | UInt16), &) : Nil
+    domain = domain.downcase
     query_records = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }.uniq!
 
     # Check cache and collect the queries we need to transmit

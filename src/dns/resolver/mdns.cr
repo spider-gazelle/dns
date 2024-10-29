@@ -38,7 +38,7 @@ class DNS::Resolver::MDNS < DNS::Resolver
         dns_response = DNS::Packet.from_slice buffer[0, received_length]
 
         # ignore anything we are not expecting
-        if dns_response.answers.any? { |answer| answer.name.downcase == domain.downcase && answer.type.in?(fetch.values) }
+        if dns_response.answers.any? { |answer| answer.name.downcase == domain && answer.type.in?(fetch.values) }
           yield dns_response
           responses += 1
           break if responses == fetch.size

@@ -1,11 +1,6 @@
 require "./spec_helper"
 
 describe DNS do
-  Spec.before_each do
-    DNS.cache.clear
-    DNS.default_resolver = DNS::Resolver::UDP.new
-  end
-
   it "should parse DNS responses" do
     bytes1 = "f30c818000010001000000000377777706676f6f676c6503636f6d0000410001c00c0041000100004c3c000d00010000010006026832026833".hexbytes
     bytes2 = "cbf2818000010001000000000377777706676f6f676c6503636f6d0000410001c00c00410001000047ec000d00010000010006026832026833".hexbytes
@@ -31,13 +26,7 @@ describe DNS do
   end
 
   it "queries for MX records and caches additional IP addresses" do
-    response = DNS.query(
-      "proton.me",
-      [
-        DNS::RecordType::MX,
-      ]
-    )
-
+    response = DNS.query("proton.me", [DNS::RecordType::MX])
     response.size.should eq 2
   end
 
@@ -145,12 +134,7 @@ describe DNS do
     end
 
     # fallback for other records
-    response = DNS.query(
-      "proton.me",
-      [
-        DNS::RecordType::MX,
-      ]
-    )
+    response = DNS.query("proton.me", [DNS::RecordType::MX])
     response.size.should eq 2
   end
 end

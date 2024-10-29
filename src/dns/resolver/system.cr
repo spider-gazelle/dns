@@ -1,4 +1,5 @@
 require "./udp"
+require "./tls"
 
 class DNS::Resolver::System < DNS::Resolver
   def initialize(@fallback = Resolver::UDP.new)
@@ -11,7 +12,6 @@ class DNS::Resolver::System < DNS::Resolver
   A     = RecordType::A.value
   AAAA  = RecordType::AAAA.value
   EMPTY = [] of Socket::Addrinfo
-  BLANK = Bytes.new(0)
 
   # Perform the DNS query, fetching using request_id => record_type
   def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
@@ -51,7 +51,7 @@ class DNS::Resolver::System < DNS::Resolver
                      raise ArgumentError.new("unexpected Addrinfo#family response #{addrinfo.family}")
                    end
 
-        Packet::ResourceRecord.new(domain, resource.record_type, ClassCode::Internet.value, 0.seconds, BLANK, resource)
+        Packet::ResourceRecord.new(domain, resource.record_type, ClassCode::Internet.value, 0.seconds, resource)
       end
 
       yield DNS::Packet.new(id: 0_u16, response: true, answers: records)

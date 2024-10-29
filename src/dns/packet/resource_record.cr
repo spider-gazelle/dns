@@ -9,7 +9,9 @@ struct DNS::Packet::ResourceRecord
 
   getter resource : Resource?
 
-  def initialize(@name : String, @type : UInt16, @class_code : UInt16, @ttl : Time::Span, @resource_data : Bytes, @resource : Resource? = nil)
+  BLANK = Bytes.new(0)
+
+  def initialize(@name : String, @type : UInt16, @class_code : UInt16, @ttl : Time::Span, @resource : Resource? = nil, @resource_data : Bytes = BLANK)
   end
 
   def self.from_slice(bytes : Bytes, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
@@ -23,10 +25,10 @@ struct DNS::Packet::ResourceRecord
     ttl = io.read_bytes(UInt32, IO::ByteFormat::BigEndian).seconds
     rdlength = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
     resource_data = Bytes.new(rdlength)
-    io.read(resource_data)
+    io.read_fully(resource_data)
 
     resource = DNS::Resource::LOOKUP[type]?.try(&.new(resource_data, io.to_slice))
-    new(name, type, class_code, ttl, resource_data, resource)
+    new(name, type, class_code, ttl, resource, resource_data)
   end
 
   def to_slice : Bytes
