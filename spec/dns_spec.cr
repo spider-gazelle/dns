@@ -17,6 +17,12 @@ describe DNS do
     DNS.select_resolver("www.google.com").is_a?(DNS::Resolver::UDP).should be_true
   end
 
+  it "returns host file entries" do
+    response = DNS.query("LocalHost", [DNS::RecordType::A])
+    response.size.should eq 1
+    response.first.ip_address.address.should eq "127.0.0.1"
+  end
+
   it "queries for A, AAAA and SVCB records" do
     response = DNS.query(
       "www.google.com",

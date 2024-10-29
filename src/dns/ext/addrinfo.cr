@@ -6,8 +6,8 @@ struct Socket::Addrinfo
   QUERY_UNSPEC = [DNS::RecordType::AAAA.value, DNS::RecordType::A.value]
 
   private def self.getaddrinfo(domain, service, family, type, protocol, timeout, &)
+    # fallback to the original implementation in these cases
     if family.unix? || Socket::IPAddress.valid?(domain) || domain.includes?('/') || DNS.select_resolver(domain).is_a?(DNS::Resolver::System)
-      # fallback to the original implementation in these cases
       domain = URI::Punycode.to_ascii domain
       Crystal::System::Addrinfo.getaddrinfo(domain, service, family, type, protocol, timeout) do |addrinfo|
         yield addrinfo
@@ -23,7 +23,7 @@ struct Socket::Addrinfo
               in .unspec?
                 QUERY_UNSPEC
               in .unix?
-                raise "unreachable"
+                raise NotImplementedError.new("unreachable")
               end
 
     DNS.query(domain, records) do |record|

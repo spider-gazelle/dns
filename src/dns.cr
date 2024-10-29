@@ -100,15 +100,13 @@ module DNS
     # > intended for resolution via the DNS, the name must be transformed to the IDNA
     # > encoding [RFC3490] prior to name lookup.
     domain = URI::Punycode.to_ascii domain.downcase
-
     query_records = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }.uniq!
-
-    # Check cache and collect the queries we need to transmit
     queries_to_send = {} of UInt16 => UInt16
+
+    # check hosts file + cache and collect the queries we need to transmit
     cache_local = cache
-    query_records.each do |query|
-      cached_record = cache_local.lookup(domain, query)
-      if cached_record
+    query_records.each do |record|
+      if cached_record = Hosts.lookup(domain, record) || cache_local.lookup(domain, record)
         yield cached_record
         next
       end
@@ -119,7 +117,7 @@ module DNS
         break if queries_to_send[query_id]?.nil?
         query_id = rand(UInt16::MAX)
       end
-      queries_to_send[query_id] = query
+      queries_to_send[query_id] = record
     end
 
     # return if all queries are answered from cache
