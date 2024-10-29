@@ -12,6 +12,11 @@ describe DNS do
     response2.answers.first.resource.as(DNS::Resource::HTTPS).alpn.should eq ["h2", "h3"]
   end
 
+  it "should select the appropriate resolver" do
+    DNS.select_resolver("starling-home-hub.local").is_a?(DNS::Resolver::MDNS).should be_true
+    DNS.select_resolver("www.google.com").is_a?(DNS::Resolver::UDP).should be_true
+  end
+
   it "queries for A, AAAA and SVCB records" do
     response = DNS.query(
       "www.google.com",

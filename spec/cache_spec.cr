@@ -18,7 +18,7 @@ describe DNS::Cache::HashMap do
 
     domain = "my.router"
     resource = DNS::Resource::A.new("192.168.0.1")
-    resource_record = DNS::Packet::ResourceRecord.new(domain, resource.record_type, DNS::ClassCode::Internet.value, 1.seconds, resource)
+    resource_record = DNS::Packet::ResourceRecord.new(domain, resource.record_type, DNS::ClassCode::Internet.value, 200.milliseconds, resource)
     packet = DNS::Packet.new(id: 0_u16, response: true, answers: [resource_record])
 
     cache.store(domain, packet)
@@ -32,7 +32,7 @@ describe DNS::Cache::HashMap do
     response.size.should eq 1
     response.first.ip_address.address.should eq "192.168.0.1"
 
-    sleep 1.second
+    sleep 300.milliseconds
 
     expect_raises(Exception, "should not perform query!") do
       DNS.query("my.router", [DNS::RecordType::A])
@@ -44,7 +44,7 @@ describe DNS::Cache::HashMap do
     domain = "my.router"
 
     resource = DNS::Resource::A.new("192.168.0.1")
-    a_record = DNS::Packet::ResourceRecord.new(domain, resource.record_type, DNS::ClassCode::Internet.value, 500.milliseconds, resource)
+    a_record = DNS::Packet::ResourceRecord.new(domain, resource.record_type, DNS::ClassCode::Internet.value, 200.milliseconds, resource)
     resource = DNS::Resource::AAAA.new("2001:db8::1:0")
     aaaa_record = DNS::Packet::ResourceRecord.new(domain, resource.record_type, DNS::ClassCode::Internet.value, 50.milliseconds, resource)
     packet = DNS::Packet.new(id: 0_u16, response: true, answers: [a_record, aaaa_record])

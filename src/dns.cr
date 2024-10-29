@@ -95,7 +95,12 @@ module DNS
   # NOTE:: A or AAAA answers may include cname and other records that are not directly relevent to the query.
   # It is up to the consumer to filter for the relevant results
   def self.query(domain : String, query_records : Array(RecordType | UInt16), &) : Nil
-    domain = domain.downcase
+    # RFC 3986 says:
+    # > When a non-ASCII registered name represents an internationalized domain name
+    # > intended for resolution via the DNS, the name must be transformed to the IDNA
+    # > encoding [RFC3490] prior to name lookup.
+    domain = URI::Punycode.to_ascii domain.downcase
+
     query_records = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }.uniq!
 
     # Check cache and collect the queries we need to transmit
