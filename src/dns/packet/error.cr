@@ -1,4 +1,4 @@
-class DNS::Packet::Error < Exception
+class DNS::Packet::Error < IO::Error
 end
 
 # The name server was unable to interpret the query.
