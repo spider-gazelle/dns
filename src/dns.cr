@@ -137,6 +137,7 @@ module DNS
     resolver.select_server do |dns_server|
       queries_to_send.reject!(questions_answered)
 
+      Log.trace { "Querying #{dns_server} -- domain: #{domain.inspect}, records: #{queries_to_send.values}" }
       resolver.query(domain, dns_server, queries_to_send) do |response|
         # raise any errors,
         # ServerError will be handled by moving to the next DNS server, assuming there is one

@@ -24,12 +24,14 @@ abstract class DNS::Resolver
   end
 
   protected def increment_failure_count(server : String)
+    Log.trace { "DNS timeout communicating with #{server}" }
     @servers_lock.synchronize { @failure_counts[server] += 1 }
   end
 
   protected def demote_server(index : Int32, servers : Array(String))
     server = servers.delete_at(index)
     servers << server
+    Log.trace { "demoting DNS server: #{server}, DNS server ordering updated" }
 
     # duplicate outside of lock for efficiency
     # and also reset the failure count

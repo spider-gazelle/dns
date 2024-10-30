@@ -62,46 +62,45 @@ module DNS::Servers
   class_getter from_host : Array(String) do
     dns_servers = [] of String
 
-    begin
-      family = LibC::AF_UNSPEC
-      flags = IpHlpApi::GAA_FLAG_SKIP_ANYCAST | IpHlpApi::GAA_FLAG_SKIP_MULTICAST
+    family = LibC::AF_UNSPEC
+    flags = IpHlpApi::GAA_FLAG_SKIP_ANYCAST | IpHlpApi::GAA_FLAG_SKIP_MULTICAST
 
-      size = UInt32.new(15_000) # Initial buffer size
+    size = UInt32.new(15_000) # Initial buffer size
+    buffer = Pointer(UInt8).malloc(size)
+
+    result = IpHlpApi.GetAdaptersAddresses(family, flags, nil, buffer.as(IpHlpApi::IP_ADAPTER_ADDRESSES*), pointerof(size))
+
+    if result == IpHlpApi::ERROR_BUFFER_OVERFLOW
+      # Reallocate buffer with the required size
       buffer = Pointer(UInt8).malloc(size)
-
       result = IpHlpApi.GetAdaptersAddresses(family, flags, nil, buffer.as(IpHlpApi::IP_ADAPTER_ADDRESSES*), pointerof(size))
+    end
 
-      if result == IpHlpApi::ERROR_BUFFER_OVERFLOW
-        # Reallocate buffer with the required size
-        buffer = Pointer(UInt8).malloc(size)
-        result = IpHlpApi.GetAdaptersAddresses(family, flags, nil, buffer.as(IpHlpApi::IP_ADAPTER_ADDRESSES*), pointerof(size))
-      end
+    if result == IpHlpApi::ERROR_SUCCESS
+      adapter = buffer.as(IpHlpApi::IP_ADAPTER_ADDRESSES*)
 
-      if result == IpHlpApi::ERROR_SUCCESS
-        adapter = buffer.as(IpHlpApi::IP_ADAPTER_ADDRESSES*)
+      while !adapter.null?
+        dns_address = adapter.value.first_dns_server_address
 
-        while !adapter.null?
-          dns_address = adapter.value.first_dns_server_address
+        while !dns_address.null?
+          sockaddr = dns_address.value.address.lp_sockaddr
+          sockaddr_len = dns_address.value.address.i_sockaddr_length
 
-          while !dns_address.null?
-            sockaddr = dns_address.value.address.lp_sockaddr
-            sockaddr_len = dns_address.value.address.i_sockaddr_length
+          ip = Socket.extract_win_ip_address(sockaddr, sockaddr_len)
+          dns_servers << ip if ip
 
-            ip = Socket.extract_win_ip_address(sockaddr, sockaddr_len)
-            dns_servers << ip if ip
-
-            dns_address = dns_address.value.next_ip
-          end
-
-          adapter = adapter.value.next_adapter
+          dns_address = dns_address.value.next_ip
         end
-      else
-        Log.warn { "GetAdaptersAddresses failed with error code: #{result}" }
+
+        adapter = adapter.value.next_adapter
       end
-    rescue ex
-      Log.warn(exception: ex) { "failed to parse GetAdaptersAddresses results" }
+    else
+      Log.trace { "GetAdaptersAddresses failed with error code: #{result}" }
     end
 
     dns_servers.uniq
+  rescue ex
+    Log.warn(exception: ex) { "failed to parse GetAdaptersAddresses results" }
+    [] of String
   end
 end
