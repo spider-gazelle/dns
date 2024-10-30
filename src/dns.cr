@@ -143,7 +143,7 @@ module DNS
         # other errors indicate an issue with the request and will be propagated
         response.raise_on_error!
         questions_answered << response.id
-        cache.store(domain, response) rescue nil
+        cache_local.store(domain, response) rescue nil
         response.answers.each do |answer|
           yield answer
         end

@@ -1,30 +1,14 @@
 require "socket"
 
 class DNS::Resolver::UDP < DNS::Resolver
-  class_getter system_servers : Array(String) do
-    dns_servers = [] of String
-    File.open("/etc/resolv.conf") do |file|
-      file.each_line do |line|
-        if line =~ /^\s*nameserver\s+([^\s]+)/
-          dns_servers << $1
-        end
-      end
-    end
-    dns_servers
-  rescue ex : Exception
-    [] of String
-  end
-
-  class_property fallback_servers : Array(String) { ["1.1.1.1", "8.8.8.8"] }
-
   # provide your own server list
   def initialize(@servers : Array(String), @port : UInt16 = 53_u16)
   end
 
   # attempts to use system server list or fallback servers if unavailable
   def initialize(@port : UInt16 = 53_u16)
-    servers = self.class.system_servers
-    servers = self.class.fallback_servers if servers.empty?
+    servers = Servers.from_host
+    servers = Servers.fallback if servers.empty?
     @servers = servers
   end
 
