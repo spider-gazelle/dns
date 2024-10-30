@@ -87,7 +87,7 @@ module DNS::Servers
             sockaddr = dns_address.value.address.lp_sockaddr
             sockaddr_len = dns_address.value.address.i_sockaddr_length
 
-            ip = Socket.extract_ip_address(sockaddr, sockaddr_len)
+            ip = Socket.extract_win_ip_address(sockaddr, sockaddr_len)
             dns_servers << ip if ip
 
             dns_address = dns_address.value.next_ip
