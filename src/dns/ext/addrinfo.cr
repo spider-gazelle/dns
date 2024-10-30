@@ -1,9 +1,9 @@
 require "socket"
 
 struct Socket::Addrinfo
-  QUERY_INET   = [DNS::RecordType::A.value]
-  QUERY_INET6  = [DNS::RecordType::AAAA.value]
-  QUERY_UNSPEC = [DNS::RecordType::AAAA.value, DNS::RecordType::A.value]
+  QUERY_INET   = [DNS::Resource::A::RECORD_TYPE]
+  QUERY_INET6  = [DNS::Resource::AAAA::RECORD_TYPE]
+  QUERY_UNSPEC = [DNS::Resource::AAAA::RECORD_TYPE, DNS::Resource::A::RECORD_TYPE]
 
   private def self.getaddrinfo(domain, service, family, type, protocol, timeout, &)
     # fallback to the original implementation in these cases
