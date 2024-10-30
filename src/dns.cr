@@ -1,5 +1,9 @@
+require "log"
+
 # An extensible DNS implementation that doesn't block the event loop
 module DNS
+  Log = ::Log.for(self)
+
   {% begin %}
     VERSION = {{ `shards version "#{__DIR__}"`.chomp.stringify.downcase }}
   {% end %}

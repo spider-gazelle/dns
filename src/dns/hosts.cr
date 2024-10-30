@@ -7,38 +7,48 @@ module DNS::Hosts
 
   # a parser for both unix and windows hosts files
   def self.parse_hosts_file(path : String = hosts_file)
+    # put in some sane defaults in case we can't parse the file for some reason
+    # also windows assumes these addresses, they don't have to be in the hosts file
     hosts = {
-      Resource::A::RECORD_TYPE    => Hash(String, String).new,
-      Resource::AAAA::RECORD_TYPE => Hash(String, String).new,
+      Resource::A::RECORD_TYPE => Hash(String, String){
+        "localhost" => "127.0.0.1",
+      },
+      Resource::AAAA::RECORD_TYPE => Hash(String, String){
+        "localhost" => "::1",
+      },
     }
 
-    File.each_line(path) do |line|
-      # Remove comments and leading/trailing whitespace
-      line = line.gsub(/#.*/, "").strip
+    begin
+      File.each_line(path) do |line|
+        # Remove comments and leading/trailing whitespace
+        line = line.gsub(/#.*/, "").strip
 
-      # Skip empty lines
-      next if line.empty?
+        # Skip empty lines
+        next if line.empty?
 
-      # Split the line into IP and hostnames
-      parts = line.split(/\s+/)
-      ip = parts.shift
+        # Split the line into IP and hostnames
+        parts = line.split(/\s+/)
+        ip = parts.shift
 
-      # Map each hostname to the IP address
-      if Socket::IPAddress.valid?(ip)
-        ip_address = Socket::IPAddress.new(ip, 0)
-        family = case ip_address.family
-                 when .inet?
-                   hosts[Resource::A::RECORD_TYPE]
-                 when .inet6?
-                   hosts[Resource::AAAA::RECORD_TYPE]
-                 else
-                   raise NotImplementedError.new("unreachable")
-                 end
+        # Map each hostname to the IP address
+        if Socket::IPAddress.valid?(ip)
+          ip_address = Socket::IPAddress.new(ip, 0)
+          family = case ip_address.family
+                   when .inet?
+                     hosts[Resource::A::RECORD_TYPE]
+                   when .inet6?
+                     hosts[Resource::AAAA::RECORD_TYPE]
+                   else
+                     raise NotImplementedError.new("unreachable")
+                   end
 
-        parts.each do |hostname|
-          family[URI::Punycode.to_ascii(hostname.downcase)] = ip
+          parts.each do |hostname|
+            family[URI::Punycode.to_ascii(hostname.downcase)] = ip
+          end
         end
       end
+    rescue ex
+      Log.warn(exception: ex) { "failed to parse hosts file: #{path}" }
     end
 
     hosts
