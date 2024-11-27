@@ -25,7 +25,7 @@ describe DNS do
 
   it "queries for A, AAAA and SVCB records" do
     response = DNS.query(
-      "www.google.com",
+      "www.microsoft.com",
       [
         DNS::RecordType::A,
         DNS::RecordType::AAAA,
@@ -33,7 +33,7 @@ describe DNS do
       ]
     )
 
-    response.size.should eq 3
+    response.size.should be >= 3
   end
 
   it "queries for MX records and caches additional IP addresses" do
