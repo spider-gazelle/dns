@@ -20,7 +20,14 @@ module DNS
       @primary_ns = Resource.read_labels(io, message)
 
       # Read the administrator's email as a domain name (with the first "." replaced by "@")
-      @admin_email = Resource.read_labels(io, message).sub(".", "@")
+      email = Resource.read_labels(io, message)
+      @admin_email = if email.includes?("\\.")
+                       parts = email.split("\\.")
+                       parts[-1] = parts[-1].sub('.', '@')
+                       parts.join('.')
+                     else
+                       email.sub('.', '@')
+                     end
 
       # Read the 32-bit values for serial, refresh, retry, expire, and minimum TTL
       @serial = io.read_bytes(UInt32, IO::ByteFormat::BigEndian)
