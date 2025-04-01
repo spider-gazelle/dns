@@ -104,7 +104,7 @@ module DNS
     # > intended for resolution via the DNS, the name must be transformed to the IDNA
     # > encoding [RFC3490] prior to name lookup.
     domain = URI::Punycode.to_ascii domain.downcase
-    query_records = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }.uniq!
+    query_records = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }.to_set
     queries_to_send = {} of UInt16 => UInt16
 
     # check hosts file + cache and collect the queries we need to transmit

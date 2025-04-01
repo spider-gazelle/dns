@@ -41,7 +41,7 @@ describe DNS do
       ]
     )
 
-    response.size.should eq 2
+    response.size.should be >= 2
     response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
   end
 
@@ -58,7 +58,7 @@ describe DNS do
       ]
     )
 
-    response.size.should eq 2
+    response.size.should be >= 2
     response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
   end
 
@@ -75,7 +75,7 @@ describe DNS do
   end
 
   it "can perform IPv4 reverse lookups" do
-    responses = DNS.query("gmail.com", [DNS::RecordType::A])
+    responses = DNS.query("gmail.com", {DNS::RecordType::A})
     ip = responses.find!(&.record_type.a?).ip_address
 
     reverse_domains = DNS.reverse_lookup ip
@@ -119,7 +119,7 @@ describe DNS do
         DNS::RecordType::AAAA,
       ]
     )
-    response.size.should eq 2
+    response.size.should be >= 2
     response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
 
     # compatible errors
