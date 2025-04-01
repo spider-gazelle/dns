@@ -98,7 +98,7 @@ module DNS
   #
   # NOTE:: A or AAAA answers may include cname and other records that are not directly relevent to the query.
   # It is up to the consumer to filter for the relevant results
-  def self.query(domain : String, query_records : Array(RecordType | UInt16), &) : Nil
+  def self.query(domain : String, query_records : Enumerable(RecordType | UInt16), &) : Nil
     # RFC 3986 says:
     # > When a non-ASCII registered name represents an internationalized domain name
     # > intended for resolution via the DNS, the name must be transformed to the IDNA
@@ -153,7 +153,7 @@ module DNS
   end
 
   # :ditto:
-  def self.query(domain : String, query_records : Array(RecordType | UInt16)) : Array(DNS::Packet::ResourceRecord)
+  def self.query(domain : String, query_records : Enumerable(RecordType | UInt16)) : Array(DNS::Packet::ResourceRecord)
     answers = Array(DNS::Packet::ResourceRecord).new(query_records.size)
     query(domain, query_records) do |answer|
       answers << answer
