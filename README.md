@@ -1,5 +1,7 @@
 # DNS
 
+[![CI](https://github.com/spider-gazelle/dns/actions/workflows/ci.yml/badge.svg)](https://github.com/spider-gazelle/dns/actions/workflows/ci.yml)
+
 Non-blocking extendable DNS client for crystal lang.
 
 With built in support for UDP, TLS, HTTPS and mDNS resolvers
