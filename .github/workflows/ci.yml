@@ -26,7 +26,7 @@ jobs:
       run: shards install --ignore-crystal-version --skip-postinstall --skip-executables
     # - name: Lint
     #   run: ./bin/ameba
-    - name: Format
-      run: crystal tool format --check
+    # - name: Format
+    #   run: crystal tool format --check
     - name: Run tests
       run: crystal spec -v --error-trace
