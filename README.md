@@ -88,6 +88,7 @@ Other things to note:
 * IPv6 is supported and handled transparently
 * a DNS cache is maintained and used based on TTL of responses
 * DNS servers may return results of expected future queries, these results are cached
+* force all DNS lookups to occur via this library: `require "dns/ext/addrinfo"`
 
 ## Contributing
 

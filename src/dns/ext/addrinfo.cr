@@ -31,6 +31,9 @@ struct Socket::Addrinfo
       if record.type.in?(records)
         # this seems to be the way to get a valid addrinfo
         ip_address = record.ip_address.address
+
+        # NOTE:: ideally we set AI_NUMERICHOST, supported on all platforms, to ensure no blocking takes place
+        # currently not possible in crystal as we don't have direct access to `ai_flags` field
         Crystal::System::Addrinfo.getaddrinfo(ip_address, service, family, type, protocol, timeout) do |addrinfo|
           yield addrinfo
         end
