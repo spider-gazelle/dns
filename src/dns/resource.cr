@@ -42,8 +42,8 @@ module DNS::Resource
       break if length.zero?
 
       if length & 0xC0 == 0xC0
-        # Pointer
-        pointer = ((length & 0x3F) << 8) | io.read_byte.as(UInt8)
+        # Pointer - convert to UInt16 before shifting to avoid overflow
+        pointer = ((length & 0x3F).to_u16 << 8) | io.read_byte.as(UInt8)
         labels << get_labels_from_pointer(pointer, message)
         break
       else

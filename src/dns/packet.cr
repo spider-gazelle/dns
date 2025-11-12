@@ -33,7 +33,7 @@ struct DNS::Packet
     @questions : Array(DNS::Packet::Question),
     @answers : Array(DNS::Packet::ResourceRecord),
     @authorities : Array(DNS::Packet::ResourceRecord),
-    @additionals : Array(DNS::Packet::ResourceRecord)
+    @additionals : Array(DNS::Packet::ResourceRecord),
   )
     @response = (flags >> 15) & 0b1 == 1             # QR (1 bit) - Response flag
     @operation_code = ((flags >> 11) & 0b1111).to_u8 # Opcode (4 bits)
@@ -57,7 +57,7 @@ struct DNS::Packet
     @questions : Array(DNS::Packet::Question) = [] of DNS::Packet::Question,
     @answers : Array(DNS::Packet::ResourceRecord) = [] of DNS::Packet::ResourceRecord,
     @authorities : Array(DNS::Packet::ResourceRecord) = [] of DNS::Packet::ResourceRecord,
-    @additionals : Array(DNS::Packet::ResourceRecord) = [] of DNS::Packet::ResourceRecord
+    @additionals : Array(DNS::Packet::ResourceRecord) = [] of DNS::Packet::ResourceRecord,
   )
     @operation_code = operation_code.is_a?(Enum) ? operation_code.value : operation_code.to_u8
   end
