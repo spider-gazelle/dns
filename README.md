@@ -28,8 +28,8 @@ require "dns"
 responses = DNS.query(
   "www.google.com",
   {
-    DNS::RecordCode::A,
-    DNS::RecordCode::AAAA,
+    DNS::RecordType::A,
+    DNS::RecordType::AAAA,
   }
 )
 
