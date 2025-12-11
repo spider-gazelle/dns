@@ -43,13 +43,13 @@ abstract class DNS::Resolver
   end
 
   # yields the server to be used for DNS lookup
-  def select_server(& : String ->)
+  def select_server(& : String ->) : Nil
     servers = self.servers.dup
 
     begin
       attempts = servers.size
       index = 0
-      error = uninitialized IO::Error | DNS::Packet::ServerError
+      error = nil.as(IO::Error | DNS::Packet::ServerError | Nil)
 
       loop do
         server = servers[index]
@@ -62,6 +62,7 @@ abstract class DNS::Resolver
           break
         rescue ex : IO::TimeoutError
           error = ex
+          Log.trace(exception: ex) { "timeout against #{server}" }
 
           if increment_failure_count(server) >= failure_limit
             # Move server to the end of the list after multiple timeouts
@@ -75,6 +76,7 @@ abstract class DNS::Resolver
           end
         rescue ex : IO::Error | DNS::Packet::ServerError
           error = ex
+          Log.trace(exception: ex) { "IO or Packet error against #{server}" }
 
           # Move server to the end of the list due to connection error
           demote_server(index, servers)
@@ -84,8 +86,10 @@ abstract class DNS::Resolver
         end
 
         attempts -= 1
-        raise error if attempts == 0
+        break if attempts <= 0
       end
+
+      raise error if error
     end
   end
 end
