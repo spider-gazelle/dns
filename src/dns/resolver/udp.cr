@@ -27,13 +27,14 @@ class DNS::Resolver::UDP < DNS::Resolver
     socket = UDPSocket.new ip.family
 
     begin
-      socket.connect(dns_server, port)
+      # socket.connect(dns_server, port)
+      server = Socket::IPAddress.new(dns_server, port)
       socket.read_timeout = timeout
 
       # pipeline the requests
       fetch.each do |id, record|
         query_bytes = DNS::Packet::Question.build_query(domain, record, id)
-        socket.send(query_bytes)
+        socket.send(query_bytes, server)
       end
 
       # process the responses
