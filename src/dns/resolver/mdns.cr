@@ -8,7 +8,15 @@ class DNS::Resolver::MDNS < DNS::Resolver
   property port : UInt16
 
   # perform the DNS query, fetching using request_id => record_type
-  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+
+    # give mDNS a little more time to respond (low powered devices)
+    timeout : Time::Span = (::DNS.timeout * 1.5),
+    & : DNS::Packet ->
+  )
     ip = Socket::IPAddress.new(dns_server, port)
     socket = UDPSocket.new ip.family
 
@@ -16,9 +24,7 @@ class DNS::Resolver::MDNS < DNS::Resolver
       # bind to an unused port
       socket.bind(ip.family.inet? ? Socket::IPAddress::UNSPECIFIED : Socket::IPAddress::UNSPECIFIED6, 0)
       socket.multicast_hops = 255
-
-      # give mDNS a little more time to respond (low powered devices)
-      socket.read_timeout = DNS.timeout * 1.5
+      socket.read_timeout = timeout
 
       # pipeline the requests
       fetch.each do |_id, record|

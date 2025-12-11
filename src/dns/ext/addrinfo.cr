@@ -1,4 +1,5 @@
 require "socket"
+require "../../dns"
 
 struct Socket::Addrinfo
   QUERY_INET   = [DNS::Resource::A::RECORD_TYPE]
@@ -26,11 +27,13 @@ struct Socket::Addrinfo
                 raise NotImplementedError.new("unreachable")
               end
 
+    found = false
     DNS.query(domain, records) do |record|
       # we need to skip non-target records like cnames
       if record.type.in?(records)
         # this seems to be the way to get a valid addrinfo
         ip_address = record.ip_address.address
+        found = true
 
         # NOTE:: ideally we set AI_NUMERICHOST, supported on all platforms, to ensure no blocking takes place
         # currently not possible in crystal as we don't have direct access to `ai_flags` field
@@ -39,5 +42,11 @@ struct Socket::Addrinfo
         end
       end
     end
+    raise Socket::Addrinfo::Error.new(message: "Hostname lookup for #{domain} failed: No address found") unless found
+    nil
+  rescue error : ::DNS::Packet::Error
+    raise Socket::Addrinfo::Error.new(message: "Hostname lookup for #{domain} failed: No address associated with hostname", cause: error)
+  rescue error : ::IO::TimeoutError
+    raise Socket::Addrinfo::Error.new(message: "Hostname lookup for #{domain} failed: No address found", cause: error)
   end
 end

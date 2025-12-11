@@ -16,13 +16,19 @@ class DNS::Resolver::UDP < DNS::Resolver
   property port : UInt16
 
   # perform the DNS query, fetching using request_id => record_type
-  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span = ::DNS.timeout,
+    & : DNS::Packet ->
+  )
     ip = Socket::IPAddress.new(dns_server, port)
     socket = UDPSocket.new ip.family
 
     begin
       socket.connect(dns_server, port)
-      socket.read_timeout = DNS.timeout
+      socket.read_timeout = timeout
 
       # pipeline the requests
       fetch.each do |id, record|

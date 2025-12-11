@@ -5,7 +5,13 @@ class CacheResolver < DNS::Resolver
     @servers = ["1.1.1.1"]
   end
 
-  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span = ::DNS.timeout,
+    & : DNS::Packet ->
+  )
     raise "should not perform query!"
   end
 end

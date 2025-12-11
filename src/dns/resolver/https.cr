@@ -9,9 +9,18 @@ class DNS::Resolver::HTTPS < DNS::Resolver
   property tls_context : OpenSSL::SSL::Context::Client?
 
   # Perform the DNS query, fetching using request_id => record_type
-  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span = ::DNS.timeout,
+    & : DNS::Packet ->
+  )
     uri = URI.parse(dns_server)
     client = HTTP::Client.new(uri, tls: @tls_context)
+    client.connect_timeout = timeout
+    client.write_timeout = timeout
+    client.read_timeout = timeout
 
     begin
       fetch.each do |id, record|

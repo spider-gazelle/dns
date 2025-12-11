@@ -14,7 +14,13 @@ class DNS::Resolver::System < DNS::Resolver
   EMPTY = [] of Socket::Addrinfo
 
   # Perform the DNS query, fetching using request_id => record_type
-  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span = ::DNS.timeout,
+    & : DNS::Packet ->
+  )
     # split out A and AAAA requests for processing seperately
     fallback_fetch = nil
     fetch.select! do |req_id, record_type|
@@ -29,9 +35,9 @@ class DNS::Resolver::System < DNS::Resolver
       case fetch.size
       when 1
         family = fetch.values.first == A ? Socket::Family::INET : Socket::Family::INET6
-        Socket::Addrinfo.tcp(domain, 443, family)
+        Socket::Addrinfo.tcp(domain, 443, family, timeout: timeout)
       when 2
-        Socket::Addrinfo.tcp(domain, 443, Socket::Family::UNSPEC)
+        Socket::Addrinfo.tcp(domain, 443, Socket::Family::UNSPEC, timeout: timeout)
       else
         EMPTY
       end

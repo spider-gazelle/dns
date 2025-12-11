@@ -1,4 +1,5 @@
 require "socket"
+require "openssl"
 
 class DNS::Resolver::TLS < DNS::Resolver
   # provide your own server list
@@ -13,11 +14,17 @@ class DNS::Resolver::TLS < DNS::Resolver
   property port : UInt16
 
   # perform the DNS query, fetching using request_id => record_type
-  def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), & : DNS::Packet ->)
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span = ::DNS.timeout,
+    & : DNS::Packet ->
+  )
     dns_server_name = server_names[dns_server]
     ip = Socket::IPAddress.new(dns_server, port)
     socket = TCPSocket.new ip.family
-    socket.read_timeout = DNS.timeout
+    socket.read_timeout = timeout
     socket.tcp_nodelay = true
 
     begin
