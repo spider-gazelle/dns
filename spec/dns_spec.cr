@@ -62,6 +62,26 @@ describe DNS do
     response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
   end
 
+  it "demotes bad servers" do
+    resolver = DNS::Resolver::UDP.new(["192.168.22.22", "8.8.8.8"])
+    resolver.servers.should eq ["192.168.22.22", "8.8.8.8"]
+    resolver.failure_limit = 1
+
+    DNS.default_resolver = resolver
+    response = DNS.query(
+      "www.google.com",
+      [
+        DNS::RecordType::A,
+        DNS::RecordType::AAAA,
+      ]
+    )
+
+    response.size.should be >= 2
+    response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
+
+    resolver.servers.should eq ["8.8.8.8", "192.168.22.22"]
+  end
+
   it "handles errors when returned from the server" do
     expect_raises(DNS::Packet::NameError, "Hostname lookup for ww1.notexisting12345.com failed") do
       DNS.query(

@@ -4,7 +4,7 @@ abstract class DNS::Resolver
   @servers_lock : Mutex = Mutex.new
   @failure_counts : Hash(String, Int32) = Hash(String, Int32).new(0)
 
-  property failure_limit : Int32 = 3
+  property failure_limit : Int32 = 2
 
   # perform the DNS query, fetching using request_id => record_type
   abstract def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), timeout : Time::Span, & : DNS::Packet ->)
@@ -49,7 +49,7 @@ abstract class DNS::Resolver
     begin
       attempts = servers.size
       index = 0
-      error = nil.as(IO::Error | DNS::Packet::ServerError | Nil)
+      error = nil
 
       loop do
         server = servers[index]
@@ -59,6 +59,7 @@ abstract class DNS::Resolver
 
           # Reset failure count on success
           reset_failure_count server
+          error = nil
           break
         rescue ex : IO::TimeoutError
           error = ex
