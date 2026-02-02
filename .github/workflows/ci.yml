@@ -28,9 +28,8 @@ jobs:
           - windows-latest
         crystal:
           - latest
+          - 1.18.2
         include:
-          - os: ubuntu-latest
-            crystal: "1.18.2"
           - experimental: true
             os: ubuntu-latest
             crystal: nightly
