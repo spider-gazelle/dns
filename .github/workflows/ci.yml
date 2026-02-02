@@ -30,7 +30,7 @@ jobs:
           - latest
         include:
           - os: ubuntu-latest
-            crystal: 1.18.2
+            crystal: "1.18.2"
           - experimental: true
             os: ubuntu-latest
             crystal: nightly
