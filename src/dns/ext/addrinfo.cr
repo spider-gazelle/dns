@@ -1,14 +1,19 @@
 require "socket"
 require "../../dns"
 
+{% begin %}
 struct Socket::Addrinfo
   QUERY_INET   = [DNS::Resource::A::RECORD_TYPE]
   QUERY_INET6  = [DNS::Resource::AAAA::RECORD_TYPE]
   QUERY_UNSPEC = [DNS::Resource::AAAA::RECORD_TYPE, DNS::Resource::A::RECORD_TYPE]
 
-  private def self.getaddrinfo(domain, service, family, type, protocol, timeout, &)
+  private def self.getaddrinfo(domain, service, family, type, protocol, timeout,
+    {% if compare_versions(Crystal::VERSION, "1.19.0") >= 0 %}
+      flags = 0,
+    {% end %}
+  &)
     # fallback to the original implementation in these cases
-    if family.unix? || Socket::IPAddress.valid?(domain) || domain.includes?('/') || DNS.select_resolver(domain).is_a?(DNS::Resolver::System)
+    if family.unix? || domain.includes?('/') || DNS.select_resolver(domain).is_a?(DNS::Resolver::System)
       domain = URI::Punycode.to_ascii domain
       Crystal::System::Addrinfo.getaddrinfo(domain, service, family, type, protocol, timeout) do |addrinfo|
         yield addrinfo
@@ -35,9 +40,12 @@ struct Socket::Addrinfo
         ip_address = record.ip_address.address
         found = true
 
-        # NOTE:: ideally we set AI_NUMERICHOST, supported on all platforms, to ensure no blocking takes place
-        # currently not possible in crystal as we don't have direct access to `ai_flags` field
-        Crystal::System::Addrinfo.getaddrinfo(ip_address, service, family, type, protocol, timeout) do |addrinfo|
+        # We set AI_NUMERICHOST, supported on all platforms, to ensure no blocking takes place
+        Crystal::System::Addrinfo.getaddrinfo(ip_address, service, family, type, protocol, timeout,
+          {% if compare_versions(Crystal::VERSION, "1.19.0") >= 0 %}
+            ::LibC::AI_NUMERICHOST
+          {% end %}
+        ) do |addrinfo|
           yield addrinfo
         end
       end
@@ -50,3 +58,4 @@ struct Socket::Addrinfo
     raise Socket::Addrinfo::Error.new(message: "Hostname lookup for #{domain} failed: No address found", cause: error)
   end
 end
+{% end %}

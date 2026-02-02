@@ -12,6 +12,22 @@ describe DNS do
     response.first.ip_address.address.should eq "127.0.0.1"
   end
 
+  it "should not perform queries for IP addresses" do
+    response = DNS.query("127.0.0.1", [DNS::RecordType::A])
+    response.size.should eq 1
+    response.first.ip_address.address.should eq "127.0.0.1"
+
+    response = DNS.query("::1", [DNS::RecordType::AAAA])
+    response.size.should eq 1
+    response.first.ip_address.address.should eq "::1"
+
+    response = DNS.query("127.0.0.1", [DNS::RecordType::AAAA])
+    response.size.should eq 0
+
+    response = DNS.query("::1", [DNS::RecordType::A])
+    response.size.should eq 0
+  end
+
   it "queries for A, AAAA and SVCB records" do
     response = DNS.query(
       "www.microsoft.com",

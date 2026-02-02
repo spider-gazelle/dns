@@ -98,7 +98,18 @@ module DNS
   #
   # NOTE:: A or AAAA answers may include cname and other records that are not directly relevent to the query.
   # It is up to the consumer to filter for the relevant results
+  # ameba:disable Metrics/CyclomaticComplexity
   def self.query(domain : String, query_records : Enumerable(RecordType | UInt16), &) : Nil
+    if Socket::IPAddress.valid?(domain)
+      record_type = Socket::IPAddress.valid_v4?(domain) ? RecordType::A : RecordType::AAAA
+      record_type_int = record_type.to_u16
+      if query_records.includes?(record_type) || query_records.includes?(record_type_int)
+        resource = record_type.a? ? Resource::A.new(domain) : Resource::AAAA.new(domain)
+        yield DNS::Packet::ResourceRecord.new(domain, record_type_int, ClassCode::Internet.to_u16, 1.day, resource)
+      end
+      return
+    end
+
     # RFC 3986 says:
     # > When a non-ASCII registered name represents an internationalized domain name
     # > intended for resolution via the DNS, the name must be transformed to the IDNA
