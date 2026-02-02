@@ -13,9 +13,14 @@ struct Socket::Addrinfo
     {% end %}
   &)
     # fallback to the original implementation in these cases
-    if family.unix? || domain.includes?('/') || DNS.select_resolver(domain).is_a?(DNS::Resolver::System)
+    is_ip = Socket::IPAddress.valid?(domain)
+    if is_ip || family.unix? || domain.includes?('/') || DNS.select_resolver(domain).is_a?(DNS::Resolver::System)
       domain = URI::Punycode.to_ascii domain
-      Crystal::System::Addrinfo.getaddrinfo(domain, service, family, type, protocol, timeout) do |addrinfo|
+      Crystal::System::Addrinfo.getaddrinfo(domain, service, family, type, protocol, timeout,
+        {% if compare_versions(Crystal::VERSION, "1.19.0") >= 0 %}
+          is_ip ? ::LibC::AI_NUMERICHOST : 0
+        {% end %}
+      ) do |addrinfo|
         yield addrinfo
       end
       return
