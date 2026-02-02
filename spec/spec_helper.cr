@@ -15,5 +15,7 @@ puts "Default Servers: #{servers}"
 
 Spec.before_each do
   DNS.cache = DNS::Cache::HashMap.new
-  DNS.default_resolver = DNS::Resolver::UDP.new
+
+  # use fallback server for better CI consistency
+  DNS.default_resolver = DNS::Resolver::UDP.new(DNS::Servers.fallback)
 end
