@@ -9,11 +9,17 @@ module DNS
   {% end %}
 
   class_property timeout : Time::Span = 1.second
-  class_property cache : Cache { Cache::HashMap.new }
   class_property default_resolver : Resolver { Resolver::UDP.new }
   class_getter resolvers : Hash(Regex, Resolver) = Hash(Regex, Resolver){
     /.+\.local$/i => Resolver::MDNS.new,
   }
+  class_property cache : Cache { Cache::HashMap.new }
+
+  def cache=(cache : Cache)
+    # ensure previous cache is shutdown cleanly
+    @cache.try(&.close)
+    previous_def(cache)
+  end
 
   # Specifies the kind of query in this message.
   enum OpCode : UInt8

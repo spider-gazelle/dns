@@ -14,6 +14,9 @@ module DNS::Cache
   # remove all entries
   abstract def clear : Nil
 
+  # called when replaced with a different cache, stops cleanup fiber
+  abstract def close : Nil
+
   def store(domain : String, response : DNS::Packet)
     response.answers.each { |answer| store(domain, answer) }
 

@@ -4,10 +4,33 @@ class DNS::Cache::HashMap
   include Cache
 
   @lock : Mutex = Mutex.new
+  @close : Channel(Nil) = Channel(Nil).new
 
   def initialize
     @cache = Hash(String, Hash(UInt16, Tuple(Time, DNS::Packet::ResourceRecord))).new do |hash, domain|
       hash[domain] = Hash(UInt16, Tuple(Time, DNS::Packet::ResourceRecord)).new
+    end
+    spawn { cleanup_loop }
+  end
+
+  def close : Nil
+    @close.close
+  end
+
+  protected def cleanup_loop
+    loop do
+      interval = 4.minutes + rand(60).seconds
+
+      select
+      when @close.receive?
+        break
+      when timeout(interval)
+        begin
+          cleanup
+        rescue error
+          Log.error(exception: error) { "performing cache cleanup" }
+        end
+      end
     end
   end
 
