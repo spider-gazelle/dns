@@ -15,6 +15,8 @@ class Socket
   end
 end
 
+require "crystal/system/win32/windows_registry"
+
 class DNS::Servers
   @[Link("iphlpapi")]
   lib IpHlpApi
@@ -59,58 +61,20 @@ class DNS::Servers
     fun GetAdaptersAddresses(family : LibC::ULong, flags : LibC::DWORD, reserved : Void*, addresses : IP_ADAPTER_ADDRESSES*, size : UInt32*) : LibC::DWORD
   end
 
-  @[Link("advapi32")]
-  lib Advapi32
-    # Registry constants
-    HKEY_LOCAL_MACHINE = Pointer(Void).new(0x80000002_u64)
-    KEY_READ           = 0x20019_u32
-    ERROR_SUCCESS      =       0_u32
-
-    alias HKEY = Void*
-
-    fun RegOpenKeyExA(hKey : HKEY, lpSubKey : UInt8*, ulOptions : LibC::DWORD, samDesired : LibC::DWORD, phkResult : HKEY*) : LibC::Long
-    fun RegQueryValueExA(hKey : HKEY, lpValueName : UInt8*, lpReserved : LibC::DWORD*, lpType : LibC::DWORD*, lpData : UInt8*, lpcbData : LibC::DWORD*) : LibC::Long
-    fun RegCloseKey(hKey : HKEY) : LibC::Long
-  end
-
   # Read DNS search list from Windows registry
   private def self.read_search_list_from_registry : Array(String)
     search = [] of String
-    key : Advapi32::HKEY = Pointer(Void).null
 
     # Open the TCPIP Parameters key
-    reg_path = "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters"
-    result = Advapi32.RegOpenKeyExA(
-      Advapi32::HKEY_LOCAL_MACHINE,
-      reg_path.to_unsafe,
-      0_u32,
-      Advapi32::KEY_READ,
-      pointerof(key)
-    )
-
-    return search unless result == Advapi32::ERROR_SUCCESS
-
-    # Try to read SearchList value (comma-separated list of domains)
-    buffer = Bytes.new(2048)
-    buffer_size = buffer.size.to_u32
-
-    result = Advapi32.RegQueryValueExA(
-      key,
-      "SearchList".to_unsafe,
-      nil,
-      nil,
-      buffer.to_unsafe,
-      pointerof(buffer_size)
-    )
-
-    if result == Advapi32::ERROR_SUCCESS && buffer_size > 0
-      # SearchList is a comma-separated string
-      end_of_string = buffer.index(0_u8) || buffer_size.to_i
-      search_string = String.new(buffer[0...end_of_string])
-      search = search_string.split(',').map(&.strip).reject(&.empty?)
+    reg_path = "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters".to_utf16
+    Crystal::System::WindowsRegistry.open?(LibC::HKEY_LOCAL_MACHINE, reg_path) do |key|
+      # Try to read SearchList value (comma-separated list of domains)
+      value_name = "SearchList".to_utf16
+      if search_string = Crystal::System::WindowsRegistry.get_string(key, value_name)
+        search = search_string.split(',').map(&.strip).reject(&.empty?)
+      end
     end
 
-    Advapi32.RegCloseKey(key)
     search
   rescue
     [] of String
