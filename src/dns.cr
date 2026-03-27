@@ -132,7 +132,7 @@ module DNS
         end
         return # Success - stop trying candidates
       rescue ex : DNS::Packet::NameError
-        last_error = ex
+        last_error ||= ex
         # Try next candidate
       end
     end
