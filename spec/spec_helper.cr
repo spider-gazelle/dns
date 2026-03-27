@@ -9,7 +9,7 @@ Spec.before_suite do
   ::Log.setup("*", :trace)
 end
 
-servers = DNS::Servers.from_host
+servers = DNS::Servers.host.servers
 servers = DNS::Servers.fallback if servers.empty?
 puts "Default Servers: #{servers}"
 

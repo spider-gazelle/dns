@@ -6,6 +6,9 @@ abstract class DNS::Resolver
 
   property failure_limit : Int32 = 2
 
+  # Server configuration including search domains and ndots for name expansion
+  property server_config : DNS::Servers = DNS::Servers.host
+
   # perform the DNS query, fetching using request_id => record_type
   abstract def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), timeout : Time::Span, & : DNS::Packet ->)
 

@@ -7,7 +7,7 @@ class DNS::Resolver::UDP < DNS::Resolver
 
   # attempts to use system server list or fallback servers if unavailable
   def initialize(@port : UInt16 = 53_u16)
-    servers = Servers.from_host
+    servers = server_config.servers
     servers = Servers.fallback if servers.empty?
     @servers = servers
   end

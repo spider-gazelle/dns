@@ -15,7 +15,7 @@ class Socket
   end
 end
 
-module DNS::Servers
+class DNS::Servers
   @[Link("iphlpapi")]
   lib IpHlpApi
     # Constants for GetAdaptersAddresses flags
@@ -59,7 +59,65 @@ module DNS::Servers
     fun GetAdaptersAddresses(family : LibC::ULong, flags : LibC::DWORD, reserved : Void*, addresses : IP_ADAPTER_ADDRESSES*, size : UInt32*) : LibC::DWORD
   end
 
-  class_getter from_host : Array(String) do
+  @[Link("advapi32")]
+  lib Advapi32
+    # Registry constants
+    HKEY_LOCAL_MACHINE = Pointer(Void).new(0x80000002_u64)
+    KEY_READ           = 0x20019_u32
+    ERROR_SUCCESS      =       0_u32
+
+    alias HKEY = Void*
+
+    fun RegOpenKeyExA(hKey : HKEY, lpSubKey : UInt8*, ulOptions : LibC::DWORD, samDesired : LibC::DWORD, phkResult : HKEY*) : LibC::Long
+    fun RegQueryValueExA(hKey : HKEY, lpValueName : UInt8*, lpReserved : LibC::DWORD*, lpType : LibC::DWORD*, lpData : UInt8*, lpcbData : LibC::DWORD*) : LibC::Long
+    fun RegCloseKey(hKey : HKEY) : LibC::Long
+  end
+
+  # Read DNS search list from Windows registry
+  private def self.read_search_list_from_registry : Array(String)
+    search = [] of String
+    key : Advapi32::HKEY = Pointer(Void).null
+
+    # Open the TCPIP Parameters key
+    reg_path = "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters"
+    result = Advapi32.RegOpenKeyExA(
+      Advapi32::HKEY_LOCAL_MACHINE,
+      reg_path.to_unsafe,
+      0_u32,
+      Advapi32::KEY_READ,
+      pointerof(key)
+    )
+
+    return search unless result == Advapi32::ERROR_SUCCESS
+
+    # Try to read SearchList value (comma-separated list of domains)
+    buffer = Bytes.new(2048)
+    buffer_size = buffer.size.to_u32
+
+    result = Advapi32.RegQueryValueExA(
+      key,
+      "SearchList".to_unsafe,
+      nil,
+      nil,
+      buffer.to_unsafe,
+      pointerof(buffer_size)
+    )
+
+    if result == Advapi32::ERROR_SUCCESS && buffer_size > 0
+      # SearchList is a comma-separated string
+      end_of_string = buffer.index(0_u8) || buffer_size.to_i
+      search_string = String.new(buffer[0...end_of_string])
+      search = search_string.split(',').map(&.strip).reject(&.empty?)
+    end
+
+    Advapi32.RegCloseKey(key)
+    search
+  rescue
+    [] of String
+  end
+
+  # Extract DNS servers from network adapters
+  private def self.dns_servers_from_adapters : Array(String)
     dns_servers = [] of String
 
     family = LibC::AF_UNSPEC
@@ -99,8 +157,18 @@ module DNS::Servers
     end
 
     dns_servers.uniq
+  end
+
+  # Load DNS configuration from Windows APIs
+  # Returns: {servers, search_domains, ndots}
+  protected def self.load_system_config : Tuple(Array(String), Array(String), Int32)
+    servers = dns_servers_from_adapters
+    search = read_search_list_from_registry
+    ndots = 1 # Windows default
+
+    {servers, search, ndots}
   rescue ex
-    Log.warn(exception: ex) { "failed to parse GetAdaptersAddresses results" }
-    [] of String
+    Log.warn(exception: ex) { "failed to parse Windows DNS configuration" }
+    {[] of String, [] of String, 1}
   end
 end

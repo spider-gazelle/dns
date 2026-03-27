@@ -102,9 +102,11 @@ module DNS
 
   # query the DNS records of a domain and return the answers
   #
+  # Automatically expands domain names using the resolver's search domains and ndots settings.
+  # Tries each expanded candidate in order until one succeeds.
+  #
   # NOTE:: A or AAAA answers may include cname and other records that are not directly relevent to the query.
   # It is up to the consumer to filter for the relevant results
-  # ameba:disable Metrics/CyclomaticComplexity
   def self.query(domain : String, query_records : Enumerable(RecordType | UInt16), &) : Nil
     if Socket::IPAddress.valid?(domain)
       record_type = Socket::IPAddress.valid_v4?(domain) ? RecordType::A : RecordType::AAAA
@@ -116,6 +118,30 @@ module DNS
       return
     end
 
+    # Select resolver first (e.g., mDNS for .local domains)
+    resolver = select_resolver(domain)
+
+    # Expand domain using the resolver's search domain configuration
+    candidates = resolver.server_config.expand(domain)
+
+    last_error : Exception? = nil
+    candidates.each do |candidate|
+      begin
+        query_single(candidate, query_records, resolver) do |answer|
+          yield answer
+        end
+        return # Success - stop trying candidates
+      rescue ex : DNS::Packet::NameError
+        last_error = ex
+        # Try next candidate
+      end
+    end
+
+    raise last_error if last_error
+  end
+
+  # Query a single domain name without search domain expansion
+  protected def self.query_single(domain : String, query_records : Enumerable(RecordType | UInt16), resolver : Resolver, &) : Nil
     # RFC 3986 says:
     # > When a non-ASCII registered name represents an internationalized domain name
     # > intended for resolution via the DNS, the name must be transformed to the IDNA
@@ -143,9 +169,6 @@ module DNS
 
     # return if all queries are answered from cache
     return if queries_to_send.empty?
-
-    # select a resolver for this domain (i.e. mDNS for .local domains)
-    resolver = select_resolver(domain)
 
     # Track which questions have been answered so far
     questions_answered = Array(UInt16).new(queries_to_send.size)

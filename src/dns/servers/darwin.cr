@@ -1,4 +1,4 @@
-module DNS::Servers
+class DNS::Servers
   @[Link(framework: "CoreFoundation")]
   @[Link(framework: "SystemConfiguration")]
   lib LibSystemConfiguration
@@ -30,14 +30,35 @@ module DNS::Servers
   end
 
   # Helper method to create a CFString from a Crystal String
-  def self.create_cfstring(str : String) : LibSystemConfiguration::CFStringRef
+  private def self.create_cfstring(str : String) : LibSystemConfiguration::CFStringRef
     cstr = str.to_unsafe
     LibSystemConfiguration.CFStringCreateWithCString(nil, cstr, LibSystemConfiguration::CFStringEncodingUTF8)
   end
 
-  # Main method to get DNS servers
-  class_getter from_host : Array(String) do
-    dns_servers = [] of String
+  # Helper to extract string array from CFArray
+  private def self.extract_string_array(array_ref : Void*) : Array(String)
+    result = [] of String
+    return result if array_ref.null?
+
+    count = LibSystemConfiguration.CFArrayGetCount(array_ref)
+    (0...count).each do |i|
+      cf_str = LibSystemConfiguration.CFArrayGetValueAtIndex(array_ref, i)
+      buffer = Bytes.new(256)
+      success = LibSystemConfiguration.CFStringGetCString(cf_str.as(UInt8*), buffer.to_unsafe, buffer.size, LibSystemConfiguration::CFStringEncodingUTF8)
+      if success
+        end_of_string = buffer.index(0_u8)
+        result << String.new(buffer[0...end_of_string])
+      end
+    end
+    result
+  end
+
+  # Load DNS configuration from SystemConfiguration framework
+  # Returns: {servers, search_domains, ndots}
+  protected def self.load_system_config : Tuple(Array(String), Array(String), Int32)
+    servers = [] of String
+    search = [] of String
+    ndots = 1 # macOS default
 
     # Create a dynamic store reference
     store_name = create_cfstring("crystal_app")
@@ -52,7 +73,7 @@ module DNS::Servers
 
     if dns_dict.null?
       Log.trace { "no DNS configuration found" }
-      return dns_servers
+      return {servers, search, ndots}
     end
 
     # Get the array of DNS server addresses
@@ -60,31 +81,23 @@ module DNS::Servers
     server_addresses_ref = LibSystemConfiguration.CFDictionaryGetValue(dns_dict, server_addresses_key)
     LibSystemConfiguration.CFRelease(server_addresses_key)
 
-    if server_addresses_ref.null?
-      Log.trace { "no DNS server addresses found in store" }
-      LibSystemConfiguration.CFRelease(dns_dict)
-      return dns_servers
+    unless server_addresses_ref.null?
+      servers = extract_string_array(server_addresses_ref.as(Void*))
     end
 
-    # Cast the CFTypeRef to CFArrayRef
-    server_addresses_array = server_addresses_ref.as(Void*)
-    count = LibSystemConfiguration.CFArrayGetCount(server_addresses_array)
+    # Get the array of search domains
+    search_domains_key = create_cfstring("SearchDomains")
+    search_domains_ref = LibSystemConfiguration.CFDictionaryGetValue(dns_dict, search_domains_key)
+    LibSystemConfiguration.CFRelease(search_domains_key)
 
-    # Iterate over the array and print DNS server addresses
-    (0...count).each do |i|
-      cf_str = LibSystemConfiguration.CFArrayGetValueAtIndex(server_addresses_array, i)
-      buffer = Bytes.new(256)
-      success = LibSystemConfiguration.CFStringGetCString(cf_str.as(UInt8*), buffer.to_unsafe, buffer.size, LibSystemConfiguration::CFStringEncodingUTF8)
-      if success
-        end_of_string = buffer.index(0_u8)
-        dns_servers << String.new(buffer[0...end_of_string])
-      end
+    unless search_domains_ref.null?
+      search = extract_string_array(search_domains_ref.as(Void*))
     end
 
     LibSystemConfiguration.CFRelease(dns_dict)
-    dns_servers
+    {servers, search, ndots}
   rescue ex
     Log.warn(exception: ex) { "failed to parse DNS configuration" }
-    [] of String
+    {[] of String, [] of String, 1}
   end
 end
