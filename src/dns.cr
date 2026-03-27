@@ -104,9 +104,11 @@ module DNS
   #
   # Automatically expands domain names using the resolver's search domains and ndots settings.
   # Tries each expanded candidate in order until one succeeds.
+  # Results are cached against the original (pre-expanded) domain name.
   #
   # NOTE:: A or AAAA answers may include cname and other records that are not directly relevent to the query.
   # It is up to the consumer to filter for the relevant results
+  # ameba:disable Metrics/CyclomaticComplexity
   def self.query(domain : String, query_records : Enumerable(RecordType | UInt16), &) : Nil
     if Socket::IPAddress.valid?(domain)
       record_type = Socket::IPAddress.valid_v4?(domain) ? RecordType::A : RecordType::AAAA
@@ -118,42 +120,16 @@ module DNS
       return
     end
 
-    # Select resolver first (e.g., mDNS for .local domains)
-    resolver = select_resolver(domain)
-
-    # Expand domain using the resolver's search domain configuration
-    candidates = resolver.server_config.expand(domain)
-
-    last_error : Exception? = nil
-    candidates.each do |candidate|
-      begin
-        query_single(candidate, query_records, resolver) do |answer|
-          yield answer
-        end
-        return # Success - stop trying candidates
-      rescue ex : DNS::Packet::NameError
-        last_error ||= ex
-        # Try next candidate
-      end
-    end
-
-    raise last_error if last_error
-  end
-
-  # Query a single domain name without search domain expansion
-  protected def self.query_single(domain : String, query_records : Enumerable(RecordType | UInt16), resolver : Resolver, &) : Nil
-    # RFC 3986 says:
-    # > When a non-ASCII registered name represents an internationalized domain name
-    # > intended for resolution via the DNS, the name must be transformed to the IDNA
-    # > encoding [RFC3490] prior to name lookup.
-    domain = URI::Punycode.to_ascii domain.downcase
-    query_records = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }.to_set
+    # Normalize the domain for cache lookups
+    # RFC 3986: internationalized domain names must be transformed to IDNA encoding
+    cache_key = URI::Punycode.to_ascii domain.downcase
+    query_records_set = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }.to_set
     queries_to_send = {} of UInt16 => UInt16
 
-    # check hosts file + cache and collect the queries we need to transmit
+    # Check hosts file and cache BEFORE expansion
     cache_local = cache
-    query_records.each do |record|
-      if cached_record = Hosts.lookup(domain, record) || cache_local.lookup(domain, record)
+    query_records_set.each do |record|
+      if cached_record = Hosts.lookup(cache_key, record) || cache_local.lookup(cache_key, record)
         yield cached_record
         next
       end
@@ -167,8 +143,43 @@ module DNS
       queries_to_send[query_id] = record
     end
 
-    # return if all queries are answered from cache
+    # Return if all queries are answered from cache/hosts
     return if queries_to_send.empty?
+
+    # Select resolver (e.g., mDNS for .local domains)
+    resolver = select_resolver(domain)
+
+    # Expand domain using the resolver's search domain configuration
+    candidates = resolver.server_config.expand(domain)
+
+    last_error : Exception? = nil
+    candidates.each do |candidate|
+      begin
+        query_single(candidate, queries_to_send, resolver, cache_key, cache_local) do |answer|
+          yield answer
+        end
+        return # Success - stop trying candidates
+      rescue ex : DNS::Packet::NameError
+        last_error ||= ex
+        # Try next candidate
+      end
+    end
+
+    raise last_error if last_error
+  end
+
+  # Query a single domain name without search domain expansion or cache lookup
+  # Cache results against both the original domain (cache_key) and expanded domain
+  protected def self.query_single(
+    domain : String,
+    queries_to_send : Hash(UInt16, UInt16),
+    resolver : Resolver,
+    cache_key : String,
+    cache_local : Cache,
+    &
+  ) : Nil
+    # Normalize the candidate domain for the actual DNS query
+    domain = URI::Punycode.to_ascii domain.downcase
 
     # Track which questions have been answered so far
     questions_answered = Array(UInt16).new(queries_to_send.size)
@@ -184,7 +195,15 @@ module DNS
         # other errors indicate an issue with the request and will be propagated
         response.raise_on_error!
         questions_answered << response.id
-        cache_local.store(domain, response) rescue nil
+
+        # Cache against the original domain name
+        cache_local.store(cache_key, response) rescue nil
+
+        # Also cache against the expanded domain if different (both are valid lookups)
+        if domain != cache_key
+          cache_local.store(domain, response) rescue nil
+        end
+
         response.answers.each do |answer|
           yield answer
         end
