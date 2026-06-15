@@ -7,20 +7,12 @@ struct Socket::Addrinfo
   QUERY_INET6  = [DNS::Resource::AAAA::RECORD_TYPE]
   QUERY_UNSPEC = [DNS::Resource::AAAA::RECORD_TYPE, DNS::Resource::A::RECORD_TYPE]
 
-  private def self.getaddrinfo(domain, service, family, type, protocol, timeout,
-    {% if compare_versions(Crystal::VERSION, "1.19.0") >= 0 %}
-      flags = 0,
-    {% end %}
-  &)
+  private def self.getaddrinfo(domain, service, family, type, protocol, timeout, flags = 0, &)
     # fallback to the original implementation in these cases
     is_ip = Socket::IPAddress.valid?(domain)
     if is_ip || family.unix? || domain.includes?('/') || DNS.select_resolver(domain).is_a?(DNS::Resolver::System)
       domain = URI::Punycode.to_ascii domain
-      Crystal::System::Addrinfo.getaddrinfo(domain, service, family, type, protocol, timeout,
-        {% if compare_versions(Crystal::VERSION, "1.19.0") >= 0 %}
-          is_ip ? ::LibC::AI_NUMERICHOST : 0
-        {% end %}
-      ) do |addrinfo|
+      Crystal::System::Addrinfo.getaddrinfo(domain, service, family, type, protocol, timeout, is_ip ? ::LibC::AI_NUMERICHOST : 0) do |addrinfo|
         yield addrinfo
       end
       return
@@ -46,11 +38,7 @@ struct Socket::Addrinfo
         found = true
 
         # We set AI_NUMERICHOST, supported on all platforms, to ensure no blocking takes place
-        Crystal::System::Addrinfo.getaddrinfo(ip_address, service, family, type, protocol, timeout,
-          {% if compare_versions(Crystal::VERSION, "1.19.0") >= 0 %}
-            ::LibC::AI_NUMERICHOST
-          {% end %}
-        ) do |addrinfo|
+        Crystal::System::Addrinfo.getaddrinfo(ip_address, service, family, type, protocol, timeout, ::LibC::AI_NUMERICHOST) do |addrinfo|
           yield addrinfo
         end
       end

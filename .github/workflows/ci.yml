@@ -28,7 +28,6 @@ jobs:
           - windows-latest
         crystal:
           - latest
-          - 1.18.2
         include:
           - experimental: true
             os: ubuntu-latest
