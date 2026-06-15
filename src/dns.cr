@@ -1,4 +1,5 @@
 require "log"
+require "random/secure"
 
 # An extensible DNS implementation that doesn't block the event loop
 module DNS
@@ -8,7 +9,13 @@ module DNS
     VERSION = {{ `shards version "#{__DIR__}"`.chomp.stringify.downcase }}
   {% end %}
 
-  class_property timeout : Time::Span = 1.second
+  # The base (initial) per-try timeout for a DNS query.
+  #
+  # This is the starting point for the resolver's exponential backoff (the
+  # `attempts` and per-try timeout are sourced from `DNS::Servers`, which honours
+  # `resolv.conf`'s `timeout:` / `attempts:` options). Modelled on glibc's
+  # `RES_TIMEOUT` (5s) but defaulting to a snappier 2s as we retransmit.
+  class_property timeout : Time::Span = 2.seconds
   class_property default_resolver : Resolver { Resolver::UDP.new }
   class_getter resolvers : Hash(Regex, Resolver) = Hash(Regex, Resolver){
     /.+\.local$/i => Resolver::MDNS.new,
@@ -135,10 +142,12 @@ module DNS
       end
 
       # find a unique id for this request
-      query_id = rand(UInt16::MAX)
+      # uses a CSPRNG over the full 16-bit space (RFC 5452) to harden against
+      # off-path response spoofing
+      query_id = Random::Secure.rand(UInt16)
       loop do
         break if queries_to_send[query_id]?.nil?
-        query_id = rand(UInt16::MAX)
+        query_id = Random::Secure.rand(UInt16)
       end
       queries_to_send[query_id] = record
     end
@@ -185,11 +194,11 @@ module DNS
     questions_answered = Array(UInt16).new(queries_to_send.size)
 
     # query the server
-    resolver.select_server do |dns_server|
+    resolver.select_server do |dns_server, timeout|
       queries_to_send.reject!(questions_answered)
 
       Log.trace { "Querying #{dns_server} -- domain: #{domain.inspect}, records: #{queries_to_send.values}" }
-      resolver.query(domain, dns_server, queries_to_send) do |response|
+      resolver.query(domain, dns_server, queries_to_send, timeout) do |response|
         # raise any errors,
         # ServerError will be handled by moving to the next DNS server, assuming there is one
         # other errors indicate an issue with the request and will be propagated

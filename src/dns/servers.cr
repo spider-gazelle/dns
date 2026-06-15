@@ -13,18 +13,33 @@ class DNS::Servers
   # Cached default instance loaded from host config
   class_getter host : DNS::Servers { DNS::Servers.new }
 
+  # default number of whole-list query attempts when not set in resolv.conf.
+  # glibc's RES_DFLRETRY is 2; we use 3 for snappier recovery from packet loss.
+  DEFAULT_ATTEMPTS = 3
+
   # Instance properties
   property servers : Array(String)
   property search : Array(String)
   property ndots : Int32
 
+  # Base (initial) per-try timeout, from resolv.conf `timeout:` (or `DNS.timeout`)
+  property timeout : Time::Span
+  # Number of whole-list query passes, from resolv.conf `attempts:`
+  property attempts : Int32
+
   # Load from system configuration (platform-specific)
   def initialize
-    @servers, @search, @ndots = DNS::Servers.load_system_config
+    @servers, @search, @ndots, @timeout, @attempts = DNS::Servers.load_system_config
   end
 
   # Manual configuration
-  def initialize(@servers : Array(String), @search : Array(String) = [] of String, @ndots : Int32 = 1)
+  def initialize(
+    @servers : Array(String),
+    @search : Array(String) = [] of String,
+    @ndots : Int32 = 1,
+    @timeout : Time::Span = DNS.timeout,
+    @attempts : Int32 = DEFAULT_ATTEMPTS,
+  )
   end
 
   # Clear cached host configuration to force reload

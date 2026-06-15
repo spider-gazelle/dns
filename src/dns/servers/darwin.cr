@@ -54,8 +54,8 @@ class DNS::Servers
   end
 
   # Load DNS configuration from SystemConfiguration framework
-  # Returns: {servers, search_domains, ndots}
-  protected def self.load_system_config : Tuple(Array(String), Array(String), Int32)
+  # Returns: {servers, search_domains, ndots, timeout, attempts}
+  protected def self.load_system_config : Tuple(Array(String), Array(String), Int32, Time::Span, Int32)
     servers = [] of String
     search = [] of String
     ndots = 1 # macOS default
@@ -73,7 +73,7 @@ class DNS::Servers
 
     if dns_dict.null?
       Log.trace { "no DNS configuration found" }
-      return {servers, search, ndots}
+      return {servers, search, ndots, DNS.timeout, DEFAULT_ATTEMPTS}
     end
 
     # Get the array of DNS server addresses
@@ -95,9 +95,9 @@ class DNS::Servers
     end
 
     LibSystemConfiguration.CFRelease(dns_dict)
-    {servers, search, ndots}
+    {servers, search, ndots, DNS.timeout, DEFAULT_ATTEMPTS}
   rescue ex
     Log.warn(exception: ex) { "failed to parse DNS configuration" }
-    {[] of String, [] of String, 1}
+    {[] of String, [] of String, 1, DNS.timeout, DEFAULT_ATTEMPTS}
   end
 end

@@ -2,8 +2,9 @@ require "socket"
 
 class DNS::Resolver::MDNS < DNS::Resolver
   def initialize(@servers : Array(String) = ["224.0.0.251", "ff02::fb"], @port : UInt16 = 5353_u16)
-    # mDNS doesn't use search domain expansion
-    @server_config = DNS::Servers.new([] of String)
+    # mDNS doesn't use search domain expansion. Give low-powered devices extra
+    # time to respond and keep to a single multicast pass per address.
+    @server_config = DNS::Servers.new([] of String, timeout: DNS.timeout * 2, attempts: 1)
   end
 
   # port to make the DNS query on, defaults to 53

@@ -45,56 +45,72 @@ abstract class DNS::Resolver
     end
   end
 
-  # yields the server to be used for DNS lookup
-  def select_server(& : String ->) : Nil
-    servers = self.servers.dup
+  # number of whole-list query passes before giving up (resolv.conf `attempts:`)
+  def attempts : Int32
+    server_config.attempts
+  end
 
-    begin
-      attempts = servers.size
+  # the base (initial) per-try timeout (resolv.conf `timeout:`)
+  def base_timeout : Time::Span
+    server_config.timeout
+  end
+
+  # per-try timeout for a given attempt: exponential backoff capped at 30s
+  # (modelled on the unix resolver's retransmission schedule)
+  protected def timeout_for(attempt : Int32) : Time::Span
+    (base_timeout * (2 ** attempt)).clamp(1.second, 30.seconds)
+  end
+
+  # yields the server (and the timeout to use) for a DNS lookup, retrying across
+  # the configured nameservers.
+  #
+  # Modelled on glibc/getaddrinfo: `attempts` whole-list passes over the
+  # nameservers, each pass using a longer (backed-off) timeout. A persistently
+  # failing server is demoted to the end of the list (see `failure_limit`) so
+  # future queries prefer healthy servers.
+  def select_server(& : (String, Time::Span) ->) : Nil
+    servers = self.servers
+    raise IO::Error.new("no DNS servers configured") if servers.empty?
+
+    error : Exception? = nil
+
+    attempts.times do |attempt|
+      timeout = timeout_for(attempt)
+
+      # try each server once this pass, in the current (demotion-aware) order
+      tried = 0
       index = 0
-      error = nil
-
-      loop do
+      while tried < servers.size
         server = servers[index]
+        demote = false
 
         begin
-          yield server
+          yield server, timeout
 
-          # Reset failure count on success
+          # success: reset the failure count and stop
           reset_failure_count server
-          error = nil
-          break
+          return
         rescue ex : IO::TimeoutError
           error = ex
           Log.trace(exception: ex) { "timeout against #{server}" }
-
-          if increment_failure_count(server) >= failure_limit
-            # Move server to the end of the list after multiple timeouts
-            demote_server(index, servers)
-
-            # Reset index to start from the new first server
-            index = 0
-          else
-            # Try the next server
-            index = (index + 1) % servers.size
-          end
+          demote = increment_failure_count(server) >= failure_limit
         rescue ex : IO::Error | DNS::Packet::ServerError
           error = ex
           Log.trace(exception: ex) { "IO or Packet error against #{server}" }
-
-          # Move server to the end of the list due to connection error
-          demote_server(index, servers)
-
-          # Reset index to start from the new first server
-          index = 0
+          demote = true
         end
 
-        attempts -= 1
-        break if attempts <= 0
+        if demote
+          # move the bad server to the end; the next server shifts into `index`
+          demote_server(index, servers)
+        else
+          index += 1
+        end
+        tried += 1
       end
-
-      raise error if error
     end
+
+    raise error if error
   end
 end
 

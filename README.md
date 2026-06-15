@@ -83,6 +83,41 @@ If DNS discovery is unsuccessful it falls back to using `["1.1.1.1", "8.8.8.8"]`
 DNS::Servers.fallback = ["192.168.0.1"]
 ```
 
+## Resolver behaviour
+
+The UDP resolver is modelled on the behaviour of unix `getaddrinfo`:
+
+* queries are retransmitted with an exponential backoff and failed over across
+  the configured nameservers, rather than failing on a single dropped packet
+* a persistently unresponsive nameserver is demoted to the end of the list so
+  later queries prefer healthy servers
+* `resolv.conf` options are honoured: `timeout:` (default `2s`, clamped `1..30`),
+  `attempts:` (default `3`, clamped `1..5`) and `ndots:` (default `1`, clamped
+  `0..15`). The base timeout can also be set globally with `DNS.timeout`.
+* an EDNS0 OPT record is sent advertising a 1232 byte UDP payload (DNS Flag Day
+  2020), and truncated (`TC`) responses are transparently refetched over TCP
+
+```crystal
+# tune the base (initial) per-try timeout; backoff doubles it each attempt
+DNS.timeout = 1.second
+```
+
+### Shared UDP source port
+
+All UDP queries are sent from a single, long-lived source port per address
+family (a process-wide `DNS::Resolver::UDP::SharedSocket`) rather than opening a
+fresh socket per query. A background fiber demultiplexes responses back to each
+waiting query by transaction id.
+
+Reusing one source port trades some of the source-port entropy recommended by
+[RFC 5452](https://datatracker.ietf.org/doc/html/rfc5452) for connection reuse,
+so every response is strictly validated before it is accepted: the transaction
+id (a CSPRNG value) must be outstanding, the `QR` bit must be set, the source
+address must match the queried server, and the echoed question must match the
+request. This is appropriate for a stub resolver talking to a trusted recursive
+resolver. If you operate over an untrusted path, prefer the TLS or HTTPS
+resolvers.
+
 Other things to note:
 
 * IPv6 is supported and handled transparently

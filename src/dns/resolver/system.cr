@@ -65,7 +65,7 @@ class DNS::Resolver::System < DNS::Resolver
 
     # perform any other queries
     if fallback_fetch
-      fallback.query(domain, dns_server, fallback_fetch) do |packet|
+      fallback.query(domain, dns_server, fallback_fetch, timeout) do |packet|
         yield packet
       end
     end

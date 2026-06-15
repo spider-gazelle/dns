@@ -1,5 +1,7 @@
 struct DNS::Packet
-  getter id : UInt16
+  # the transaction id. settable so the shared UDP transport can remap a
+  # response's wire id back to the caller's logical request id.
+  property id : UInt16
 
   getter? response : Bool
   getter operation_code : UInt8

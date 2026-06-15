@@ -38,11 +38,17 @@ struct DNS::Packet::ResourceRecord
   end
 
   def to_io(io : IO, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
-    name.split('.').each do |label|
-      io.write_byte(label.size.to_u8)
-      io.write(label.to_slice)
+    # an empty name is the DNS root and must be encoded as a single zero byte
+    # (e.g. the EDNS0 OPT pseudo-record); splitting "" would emit two zero bytes
+    if name.empty?
+      io.write_byte(0_u8)
+    else
+      name.split('.').each do |label|
+        io.write_byte(label.size.to_u8)
+        io.write(label.to_slice)
+      end
+      io.write_byte(0_u8) # Null terminator for the domain name
     end
-    io.write_byte(0_u8) # Null terminator for the domain name
     io.write_bytes(type, IO::ByteFormat::BigEndian)
     io.write_bytes(class_code, IO::ByteFormat::BigEndian)
     io.write_bytes(ttl.total_seconds.to_u32, IO::ByteFormat::BigEndian)

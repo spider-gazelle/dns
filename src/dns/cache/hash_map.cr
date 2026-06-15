@@ -56,6 +56,9 @@ class DNS::Cache::HashMap
 
   # store a result in the cache
   def store(domain : String, result : DNS::Packet::ResourceRecord) : Nil
+    # the EDNS0 OPT pseudo-record (type 41) carries transport metadata in its
+    # CLASS/TTL fields, not a real record - it must never be cached
+    return if result.type == DNS::RecordType::OPT.value
     return if result.ttl.zero?
     expiry_time = result.ttl.from_now
     @lock.synchronize { @cache[domain][result.type] = {expiry_time, result} }

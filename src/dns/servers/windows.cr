@@ -124,15 +124,15 @@ class DNS::Servers
   end
 
   # Load DNS configuration from Windows APIs
-  # Returns: {servers, search_domains, ndots}
-  protected def self.load_system_config : Tuple(Array(String), Array(String), Int32)
+  # Returns: {servers, search_domains, ndots, timeout, attempts}
+  protected def self.load_system_config : Tuple(Array(String), Array(String), Int32, Time::Span, Int32)
     servers = dns_servers_from_adapters
     search = read_search_list_from_registry
     ndots = 1 # Windows default
 
-    {servers, search, ndots}
+    {servers, search, ndots, DNS.timeout, DEFAULT_ATTEMPTS}
   rescue ex
     Log.warn(exception: ex) { "failed to parse Windows DNS configuration" }
-    {[] of String, [] of String, 1}
+    {[] of String, [] of String, 1, DNS.timeout, DEFAULT_ATTEMPTS}
   end
 end

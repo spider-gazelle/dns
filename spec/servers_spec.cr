@@ -107,5 +107,64 @@ describe DNS::Servers do
       servers.search.should eq [] of String
       servers.ndots.should eq 1
     end
+
+    it "defaults timeout and attempts" do
+      servers = DNS::Servers.new(["1.1.1.1"])
+      servers.timeout.should eq DNS.timeout
+      servers.attempts.should eq DNS::Servers::DEFAULT_ATTEMPTS
+    end
   end
+
+  {% if !flag?(:windows) && !flag?(:darwin) %}
+    describe "resolv.conf options" do
+      it "parses timeout, attempts and ndots" do
+        file = File.tempfile("resolv", ".conf")
+        File.write(file.path, "nameserver 9.9.9.9\noptions timeout:9 attempts:4 ndots:3\n")
+        original = DNS::Servers.resolv_conf
+        begin
+          DNS::Servers.resolv_conf = file.path
+          cfg = DNS::Servers.new
+          cfg.servers.should eq ["9.9.9.9"]
+          cfg.timeout.should eq 9.seconds
+          cfg.attempts.should eq 4
+          cfg.ndots.should eq 3
+        ensure
+          DNS::Servers.resolv_conf = original
+          DNS::Servers.reload
+          file.delete
+        end
+      end
+
+      it "clamps out-of-range option values" do
+        file = File.tempfile("resolv", ".conf")
+        File.write(file.path, "nameserver 9.9.9.9\noptions timeout:0 attempts:99 ndots:99\n")
+        original = DNS::Servers.resolv_conf
+        begin
+          DNS::Servers.resolv_conf = file.path
+          cfg = DNS::Servers.new
+          cfg.timeout.should eq 1.second # floored to 1
+          cfg.attempts.should eq 5       # capped at 5
+          cfg.ndots.should eq 15         # capped at 15
+        ensure
+          DNS::Servers.resolv_conf = original
+          DNS::Servers.reload
+          file.delete
+        end
+      end
+
+      it "allows ndots:0" do
+        file = File.tempfile("resolv", ".conf")
+        File.write(file.path, "nameserver 9.9.9.9\noptions ndots:0\n")
+        original = DNS::Servers.resolv_conf
+        begin
+          DNS::Servers.resolv_conf = file.path
+          DNS::Servers.new.ndots.should eq 0
+        ensure
+          DNS::Servers.resolv_conf = original
+          DNS::Servers.reload
+          file.delete
+        end
+      end
+    end
+  {% end %}
 end
