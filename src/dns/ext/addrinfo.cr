@@ -9,6 +9,8 @@ require "../../dns"
 
     private def self.getaddrinfo(domain, service, family, type, protocol, timeout, flags = 0, &)
       # fallback to the original implementation in these cases
+      family ||= Family::UNSPEC
+
       is_ip = Socket::IPAddress.valid?(domain)
       if is_ip || family.unix? || domain.includes?('/') || DNS.select_resolver(domain).is_a?(DNS::Resolver::System)
         domain = URI::Punycode.to_ascii domain
