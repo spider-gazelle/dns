@@ -105,18 +105,18 @@ class DNS::Resolver::UDP < DNS::Resolver
       socket.flush
 
       message_length = socket.read_bytes(UInt16, IO::ByteFormat::BigEndian)
-      return nil if message_length.zero?
+      return if message_length.zero?
       message_bytes = Bytes.new(message_length)
       socket.read_fully(message_bytes)
       packet = DNS::Packet.from_slice(message_bytes)
 
       # validate the response matches the request we sent (the connected socket
       # guarantees the peer, but we still verify id + question for correctness)
-      return nil unless packet.response? && packet.id == id
+      return unless packet.response? && packet.id == id
       question = packet.questions.first?
-      return nil unless question && question.type == record
-      return nil unless question.class_code == DNS::ClassCode::Internet.value
-      return nil unless question.name.downcase == domain
+      return unless question && question.type == record
+      return unless question.class_code == DNS::ClassCode::Internet.value
+      return unless question.name.downcase == domain
       packet
     rescue ex : IO::Error
       Log.trace(exception: ex) { "TCP fallback to #{server} failed" }
@@ -218,16 +218,14 @@ class DNS::Resolver::UDP < DNS::Resolver
     private def read_loop(socket : UDPSocket) : Nil
       buffer = Bytes.new(RECV_BUFFER_SIZE)
       loop do
-        begin
-          length, source = socket.receive(buffer)
-          next if length.zero?
-          # copy out of the reused buffer before handing across the channel
-          handle_datagram(buffer[0, length].dup, source)
-        rescue IO::Error
-          break # socket closed / unrecoverable: stop reading
-        rescue ex
-          Log.warn(exception: ex) { "error processing DNS response on shared socket" }
-        end
+        length, source = socket.receive(buffer)
+        next if length.zero?
+        # copy out of the reused buffer before handing across the channel
+        handle_datagram(buffer[0, length].dup, source)
+      rescue IO::Error
+        break # socket closed / unrecoverable: stop reading
+      rescue ex
+        Log.warn(exception: ex) { "error processing DNS response on shared socket" }
       end
     end
 

@@ -82,7 +82,6 @@ abstract class DNS::Resolver
       index = 0
       while tried < servers.size
         server = servers[index]
-        demote = false
 
         begin
           yield server, timeout

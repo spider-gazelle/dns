@@ -57,7 +57,7 @@ module DNS::Hosts
   class_getter hosts : Hash(UInt16, Hash(String, String)) { parse_hosts_file }
 
   def self.lookup(domain : String, record : UInt16) : DNS::Packet::ResourceRecord?
-    return nil unless {Resource::A::RECORD_TYPE, Resource::AAAA::RECORD_TYPE}.includes?(record)
+    return unless {Resource::A::RECORD_TYPE, Resource::AAAA::RECORD_TYPE}.includes?(record)
 
     if ip = hosts[record][domain]?
       resource = case record
@@ -66,7 +66,7 @@ module DNS::Hosts
                  when Resource::AAAA::RECORD_TYPE
                    Resource::AAAA.new(ip)
                  else
-                   return nil
+                   return
                  end
 
       Packet::ResourceRecord.new(domain, record, ClassCode::Internet.value, 0.seconds, resource)

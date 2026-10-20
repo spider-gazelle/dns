@@ -6,9 +6,6 @@ class DNS::Packet::Question
   def initialize(@name : String, @type : UInt16, @class_code : UInt16 = 1_u16)
   end
 
-  def initialize(@name : String, @type : UInt16, @class_code : UInt16 = 1_u16)
-  end
-
   def self.from_slice(bytes : Bytes, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
     from_io(IO::Memory.new(bytes), format)
   end

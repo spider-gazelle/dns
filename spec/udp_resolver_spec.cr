@@ -21,19 +21,17 @@ class DNSStub
     spawn do
       buffer = Bytes.new(4096)
       loop do
-        begin
-          length, source = @udp.receive(buffer)
-          @request_count += 1
-          @source_ports << source.port
-          query = DNS::Packet.from_slice(buffer[0, length].dup)
-          if reply = handler.call(query, @request_count)
-            @udp.send(reply, source)
-          end
-        rescue IO::Error
-          break
-        rescue ex
-          # ignore malformed datagrams in tests
+        length, source = @udp.receive(buffer)
+        @request_count += 1
+        @source_ports << source.port
+        query = DNS::Packet.from_slice(buffer[0, length].dup)
+        if reply = handler.call(query, @request_count)
+          @udp.send(reply, source)
         end
+      rescue IO::Error
+        break
+      rescue
+        # ignore malformed datagrams in tests
       end
     end
   end

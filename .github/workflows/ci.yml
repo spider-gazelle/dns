@@ -13,6 +13,8 @@ jobs:
         uses: crystal-lang/install-crystal@v1
       - name: Install Dependencies
         run: shards install
+      - name: Build Ameba
+        run: crystal build -o bin/ameba lib/ameba/bin/ameba.cr
       - name: Ameba
         run: ./bin/ameba
       - name: Format

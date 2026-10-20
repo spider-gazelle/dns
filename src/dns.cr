@@ -163,15 +163,13 @@ module DNS
 
     last_error : Exception? = nil
     candidates.each do |candidate|
-      begin
-        query_single(candidate, queries_to_send, resolver, cache_key, cache_local) do |answer|
-          yield answer
-        end
-        return # Success - stop trying candidates
-      rescue ex : DNS::Packet::NameError
-        last_error ||= ex
-        # Try next candidate
+      query_single(candidate, queries_to_send, resolver, cache_key, cache_local) do |answer|
+        yield answer
       end
+      return # Success - stop trying candidates
+    rescue ex : DNS::Packet::NameError
+      last_error ||= ex
+      # Try next candidate
     end
 
     raise last_error if last_error

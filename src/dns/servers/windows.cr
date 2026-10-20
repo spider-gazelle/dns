@@ -9,8 +9,6 @@ class Socket
       Socket::IPAddress.new(sockaddr_ptr.as(LibC::SockaddrIn*), sockaddr_len).address
     when LibC::AF_INET6
       Socket::IPAddress.new(sockaddr_ptr.as(LibC::SockaddrIn6*), sockaddr_len).address
-    else
-      nil
     end
   end
 end

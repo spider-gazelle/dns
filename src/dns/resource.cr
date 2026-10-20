@@ -21,7 +21,7 @@ module DNS::Resource
       {% for resource in RESOURCE_STRUCTS %}
         {% type_code = resource.constant("RECORD_TYPE") %}
         {% raise("#{resource.name} must define RECORD_TYPE") unless type_code %}
-        {{type_code}} => {{resource.name.id}},
+        {{ type_code }} => {{ resource.name.id }},
       {% end %}
     }
   end
