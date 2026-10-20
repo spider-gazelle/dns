@@ -198,7 +198,8 @@ describe DNS::Resolver::UDP do
     end
 
     responses.size.should eq 1
-    stub.request_count.should be >= 2 # proves a retransmission occurred
+    # proves a retransmission occurred
+    stub.request_count.should be >= 2
   ensure
     stub.try(&.close)
   end
