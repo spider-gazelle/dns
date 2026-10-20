@@ -14,7 +14,7 @@ jobs:
       - name: Install Dependencies
         run: shards install
       - name: Build Ameba
-        run: crystal build -o bin/ameba lib/ameba/bin/ameba.cr
+        run: mkdir -p bin && crystal build -o bin/ameba lib/ameba/bin/ameba.cr
       - name: Ameba
         run: ./bin/ameba
       - name: Format
