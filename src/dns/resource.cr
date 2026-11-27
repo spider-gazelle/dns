@@ -35,6 +35,11 @@ module DNS::Resource
   # the entire message must be provided in case this is a pointer to another
   # point in the complete message
   def self.read_labels(io : IO::Memory, message : Bytes, *, allow_compression : Bool = true) : String
+    read_name_labels(io, message, allow_compression: allow_compression).join(".")
+  end
+
+  # :nodoc:
+  def self.read_name_labels(io : IO::Memory, message : Bytes, *, allow_compression : Bool = true) : Array(String)
     labels = [] of String
     pointers = Set(UInt16).new
     wire_size = 1 # root label
@@ -61,7 +66,7 @@ module DNS::Resource
         labels << io.read_string(length)
       end
     end
-    labels.join(".")
+    labels
   end
 
   # :nodoc:

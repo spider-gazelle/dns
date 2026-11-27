@@ -26,3 +26,5 @@ module DNS::DNSSEC
   class UnsupportedResolver < DNS::Packet::Error
   end
 end
+
+require "./dnssec/*"
