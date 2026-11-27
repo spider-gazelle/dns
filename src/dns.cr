@@ -185,6 +185,10 @@ module DNS
   ) : Array(Packet::ResourceRecord)
     requested_types = query_records.map(&.to_u16).to_set
     return [] of Packet::ResourceRecord if requested_types.empty?
+    original_name = normalize_name(domain)
+    if original_name == "localhost" || original_name.ends_with?(".localhost")
+      return loopback_answers(original_name, requested_types)
+    end
     if Socket::IPAddress.valid?(domain)
       raise DNSSEC::ValidationError.new(DNSSEC::Status::Indeterminate, "DNSSEC cannot authenticate an IP literal")
     end
@@ -192,6 +196,18 @@ module DNS
     candidates = resolver.server_config.expand(domain).map { |name| normalize_name(name) }.uniq!
     search_candidates(candidates, requested_types) do |candidate|
       resolver.validated_answers(candidate, requested_types)
+    end
+  end
+
+  # RFC 6761 section 6.3: localhost names always resolve to loopback and are
+  # never sent upstream, so strict lookups do not depend on the hosts file.
+  private def self.loopback_answers(name : String, requested_types : Set(UInt16)) : Array(Packet::ResourceRecord)
+    requested_types.compact_map do |type|
+      resource = case type
+                 when Resource::A::RECORD_TYPE    then Resource::A.new("127.0.0.1")
+                 when Resource::AAAA::RECORD_TYPE then Resource::AAAA.new("::1")
+                 end
+      Packet::ResourceRecord.new(name, type, ClassCode::Internet.value, 0.seconds, resource) if resource
     end
   end
 

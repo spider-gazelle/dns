@@ -220,6 +220,8 @@ NODATA returns no records of the requested type.
 
 Strict lookups use the configured upstream and its search domains. They
 bypass the hosts file, shared cache, and resolver routes such as mDNS.
+`localhost` and names ending in `.localhost` always resolve to `127.0.0.1` and
+`::1` without an upstream query. [RFC 6761](https://www.rfc-editor.org/rfc/rfc6761.html#section-6.3)
 IP literals raise `ValidationError` because they have no DNSSEC proof.
 Use `trust_anchors:` on `DNS::Resolver::Validating.new` for signed private zones.
 `DNS.query_packet` remains available for inspecting raw upstream packets.

@@ -97,12 +97,20 @@ describe DNS::Resolver::Validating do
     DNS.cache.store(name, DNS::Packet.new(id: 0_u16, response: true, answers: [a_answer(name)]))
     DNS.query("www", [a_type]).map(&.ip_address.address).sort!.should eq ["192.0.2.3", "192.0.2.4"]
 
-    expect_raises(DNS::DNSSEC::ValidationError) { DNS.query("localhost.", [a_type]) }
     error = expect_raises(DNS::DNSSEC::ValidationError) { DNS.query("127.0.0.1", [a_type]) }
     error.status.should eq DNS::DNSSEC::Status::Indeterminate
   ensure
     DNS.resolvers.delete(route) if route
     fixture.try(&.close)
+  end
+
+  it "answers localhost names with loopback addresses without querying upstream" do
+    DNS.default_resolver = DNS::Resolver::Validating.new(DNS::Resolver::UDP.new([] of String))
+    {"localhost", "LocalHost.", "app.localhost"}.each do |name|
+      DNS.query(name, [a_type]).map(&.ip_address.address).should eq ["127.0.0.1"]
+      DNS.query(name, [DNS::RecordType::AAAA]).map(&.ip_address.address).should eq ["::1"]
+    end
+    DNS.query("localhost", [DNS::RecordType::MX]).should be_empty
   end
 
   it "rejects bogus and insecure replies, including bogus replies with upstream AD" do
