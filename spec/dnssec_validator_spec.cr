@@ -9,8 +9,9 @@ private class DNSSECFixture
   OPT     = DNS::Packet::EDNS.new.to_resource_record
 
   getter stub : DNSStub
+  property mode : Symbol
 
-  def initialize(@mode : Symbol = :normal)
+  def initialize(@mode : Symbol = :normal, *, @answer_ttls = {} of String => Time::Span)
     @stub = DNSStub.new
     @stub.serve_udp { |query, _, _| reply(query) }
   end
@@ -50,6 +51,12 @@ private class DNSSECFixture
     code, raw_answers, raw_authorities = scenario.as_a
     answers = raw_answers.as_a.map { |row| record(row) }
     authorities = raw_authorities.as_a.map { |row| record(row) }
+    if ttl = @answer_ttls[key]?
+      answers.map! do |answer|
+        answer.ttl = ttl
+        answer
+      end
+    end
     if @mode == :tampered
       answers.map! do |answer|
         if answer.type == DNS::RecordType::A.value
@@ -171,6 +178,64 @@ describe DNS::Resolver::Validating do
 end
 
 describe DNS::DNSSEC::Validator do
+  it "reuses authenticated keys across names and still verifies each answer" do
+    fixture = DNSSECFixture.new
+    validator = fixture.validator
+    now = DNSSECFixture::NOW
+
+    validator.query("www.secure.test.", DNS::RecordType::A, now: now).secure?.should be_true
+    fixture.stub.request_count.should eq 4
+
+    validator.query("target.secure.test.", DNS::RecordType::A, now: now).secure?.should be_true
+    fixture.stub.request_count.should eq 5
+
+    validator.query("www.ed.test.", DNS::RecordType::A, now: now).secure?.should be_true
+    fixture.stub.request_count.should eq 8
+
+    fixture.mode = :tampered
+    result = validator.query("target.secure.test.", DNS::RecordType::A, now: now)
+    result.status.should eq DNS::DNSSEC::Status::Bogus
+    result.answers.should be_empty
+  ensure
+    fixture.try(&.close)
+  end
+
+  it "refreshes cached keys when their DNSKEY, DS or ancestor DNSKEY TTL expires" do
+    {"secure.test. 48" => 3, "secure.test. 43" => 3, "test. 48" => 4}.each do |record, refresh_queries|
+      fixture = DNSSECFixture.new(answer_ttls: {record => 5.seconds})
+      validator = fixture.validator
+      now = DNSSECFixture::NOW
+
+      validator.query("www.secure.test.", DNS::RecordType::A, now: now).secure?.should be_true
+      validator.query("www.secure.test.", DNS::RecordType::A, now: now + 4.seconds).secure?.should be_true
+      fixture.stub.request_count.should eq 5
+
+      validator.query("www.secure.test.", DNS::RecordType::A, now: now + 5.seconds).secure?.should be_true
+      fixture.stub.request_count.should eq 5 + refresh_queries
+    ensure
+      fixture.try(&.close)
+    end
+  end
+
+  it "does not reuse a key checked at a later validation time or past signature expiry" do
+    fixture = DNSSECFixture.new
+    validator = fixture.validator
+    now = Time.unix(1_999_999_998)
+
+    validator.query("www.secure.test.", DNS::RecordType::A, now: now).secure?.should be_true
+    validator.query("www.secure.test.", DNS::RecordType::A, now: now - 1.second).secure?.should be_true
+    fixture.stub.request_count.should eq 8
+
+    validator.query("www.secure.test.", DNS::RecordType::A, now: now + 1.second).secure?.should be_true
+    fixture.stub.request_count.should eq 9
+
+    result = validator.query("www.secure.test.", DNS::RecordType::A, now: now + 2.seconds)
+    result.secure?.should be_true
+    fixture.stub.request_count.should eq 13
+  ensure
+    fixture.try(&.close)
+  end
+
   it "validates an RSA trust anchor, ECDSA delegation and RRset with its original signed TTL" do
     fixture = DNSSECFixture.new
     result = fixture.validator.query("WWW.Secure.Test.", DNS::RecordType::A, now: DNSSECFixture::NOW)

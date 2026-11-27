@@ -23,9 +23,11 @@ module DNS::DNSSEC
     end
   end
 
-  # A validating stub. Each lookup uses a fresh validation context and returns
-  # only answer records that were authenticated locally.
+  # A validating stub. Each lookup validates its answer locally and can reuse
+  # authenticated keys from earlier lookups through this validator.
   class Validator
+    @key_cache = KeyCache.new
+
     # Current IANA root KSK digests, including the published rollover key.
     # https://www.iana.org/dnssec/files
     def self.root_anchors : Array(TrustAnchor)
@@ -48,7 +50,7 @@ module DNS::DNSSEC
 
     def query(domain : String, type : RecordType | UInt16, *, now : Time = Time.utc) : Result
       name = Wire::Name.from_text(domain)
-      Validation.new(@resolver, @anchors, now.to_unix.to_u32!).query(name, type.to_u16)
+      Validation.new(@resolver, @anchors, @key_cache, now).query(name, type.to_u16)
     end
   end
 
@@ -60,6 +62,8 @@ module DNS::DNSSEC
     alias Signature = Crypto::Signature
     alias Key = Crypto::Key
 
+    private record Authentication, ttl : UInt32, key_expiry : KeyExpiry
+
     private OPTS           = Options.new(dnssec_ok: true, checking_disabled: true)
     private MAX_QUERIES    =  64
     private MAX_SIGNATURES = 256
@@ -67,12 +71,14 @@ module DNS::DNSSEC
     private MAX_PROOFS     =  64
 
     @messages = {} of {Name, UInt16} => Message
-    @keys = {} of Name => Array(Key)
+    @keys = {} of Name => AuthenticatedKeys
     @failed_keys = {} of Name => ValidationError
+    @started = Time.instant
     @remaining_queries = MAX_QUERIES
     @remaining_signatures = MAX_SIGNATURES
 
-    def initialize(@resolver : Resolver, @anchors : Hash(Name, Array(Crypto::DS)), @now : UInt32)
+    def initialize(@resolver : Resolver, @anchors : Hash(Name, Array(Crypto::DS)), @key_cache : KeyCache, @time : Time)
+      @now = @time.to_unix.to_u32!
     end
 
     def query(name : Name, type : UInt16) : Result
@@ -191,31 +197,39 @@ module DNS::DNSSEC
         raise ValidationError.new(Status::Indeterminate, "no configured trust anchor covers #{name}")
     end
 
-    private def keys_for(zone : Name) : Array(Key)
+    private def keys_for(zone : Name) : AuthenticatedKeys
       if failure = @failed_keys[zone]?
         raise failure
       end
-      @keys[zone] ||= load_keys(zone)
+      @keys[zone] ||= @key_cache.lookup(zone, @time) || load_keys(zone)
     rescue ex : ValidationError
       @failed_keys[zone] = ex
       raise ex
     end
 
-    private def load_keys(zone : Name) : Array(Key)
+    private def load_keys(zone : Name) : AuthenticatedKeys
       anchor = anchor_for(zone)
-      ds = zone == anchor ? @anchors[anchor] : delegated_ds(zone)
+      ds, delegation_expiry = zone == anchor ? {@anchors[anchor], nil} : delegated_ds(zone)
       message = fetch(zone, RecordType::DNSKEY.value)
       records = message.answer(zone, RecordType::DNSKEY.value)
       raise ValidationError.new(Status::Bogus, "missing DNSKEY RRset for #{zone}") if records.empty? || message.code != 0
       keys = records.map { |record| Key.new(record.data) }.select(&.usable?)
       trusted = keys.select { |key| ds.any?(&.matches?(zone, key)) }
-      if trusted.empty? || authenticated_dnskeys(records, message, zone, trusted).nil?
+      if trusted.empty? || !(ttl = authenticated_dnskeys(records, message, zone, trusted))
         raise ValidationError.new(Status::Bogus, "DNSKEY RRset for #{zone} does not validate against its DS")
       end
-      keys
+      expiry = key_expiry(ttl)
+      expiry = expiry.limit(delegation_expiry) if delegation_expiry
+      entry = AuthenticatedKeys.new(keys, @time, expiry)
+      @key_cache.store(zone, entry)
+      entry
     end
 
-    private def delegated_ds(zone : Name) : Array(Crypto::DS)
+    private def key_expiry(ttl : UInt32) : KeyExpiry
+      KeyExpiry.new(Time.unix(@time.to_unix + ttl), @started + ttl.seconds)
+    end
+
+    private def delegated_ds(zone : Name) : {Array(Crypto::DS), KeyExpiry}
       message = fetch(zone, RecordType::DS.value)
       records = message.answer(zone, RecordType::DS.value)
       if records.empty?
@@ -228,9 +242,9 @@ module DNS::DNSSEC
       unless message.code.zero?
         raise ValidationError.new(Status::Bogus, "negative response contains DS records for #{zone}")
       end
-      authenticate(records, message.answers, message, parent_only: true)
+      authentication = authenticate(records, message.answers, message, parent_only: true)
       ds = records.map { |record| Crypto::DS.parse(record.data) }
-      return ds if ds.any?(&.supported?)
+      return {ds, key_expiry(authentication.ttl).limit(authentication.key_expiry)} if ds.any?(&.supported?)
       # RFC 6840 section 5.2: treat this like an authenticated unsigned delegation.
       raise ValidationError.new(Status::Insecure, "no supported DS digest and signature algorithm for #{zone}")
     end
@@ -242,7 +256,7 @@ module DNS::DNSSEC
 
     private def authenticate_answer(records : Array(RR), message : Message) : UInt32
       parent_only = records.first.type == RecordType::DS.value && records.first.name.size > 0
-      authenticate(records, message.answers, message, parent_only: parent_only)
+      authenticate(records, message.answers, message, parent_only: parent_only).ttl
     rescue ex : ValidationError
       if ex.status.bogus? && unsigned_ancestor?(records.first.name)
         raise ValidationError.new(Status::Insecure, "answer is below an authenticated unsigned delegation")
@@ -270,7 +284,7 @@ module DNS::DNSSEC
       nil
     end
 
-    private def authenticate(records : Array(RR), section : Array(RR), message : Message, *, parent_only : Bool = false) : UInt32
+    private def authenticate(records : Array(RR), section : Array(RR), message : Message, *, parent_only : Bool = false) : Authentication
       name = records.first.name
       error : ValidationError? = nil
       signatures(records, section).each do |signature|
@@ -286,21 +300,22 @@ module DNS::DNSSEC
       raise ValidationError.new(Status::Bogus, "missing DNSSEC signature for #{name} type #{records.first.type}")
     end
 
-    private def authenticate_signature(records : Array(RR), signature : Signature, message : Message) : UInt32
+    private def authenticate_signature(records : Array(RR), signature : Signature, message : Message) : Authentication
       name = records.first.name
       keys = keys_for(signature.signer)
       unless Crypto.supported?(signature.algorithm)
         raise ValidationError.new(Status::Indeterminate, "unsupported DNSSEC signature algorithm #{signature.algorithm}")
       end
       signed_owner = signed_owner_for(name, signature)
-      if !signed_owner || !(ttl = verify(records, signature, keys, signed_owner))
+      if !signed_owner || !(ttl = verify(records, signature, keys.keys, signed_owner))
         raise ValidationError.new(Status::Bogus, "DNSSEC signature failed for #{name}")
       end
-      return ttl if signed_owner == name
+      authentication = Authentication.new(ttl, keys.expiry)
+      return authentication if signed_owner == name
 
       proofs(message, name, only: signature.signer).each do |proof|
         status = proof.wildcard(name, signed_owner.suffix(signature.labels.to_i))
-        return ttl if status == Status::Secure
+        return authentication if status == Status::Secure
         if status == Status::Insecure
           raise ValidationError.new(Status::Insecure, "wildcard denial proof crosses an opt-out interval")
         end
@@ -352,7 +367,7 @@ module DNS::DNSSEC
               error ||= ValidationError.new(Status::Indeterminate, "unsupported DNSSEC denial signature algorithm #{signature.algorithm}")
               next
             end
-            if verify(rrset, signature, keys, rrset.first.name)
+            if verify(rrset, signature, keys.keys, rrset.first.name)
               (authenticated[signature.signer] ||= [] of RR).concat(rrset)
               break
             end

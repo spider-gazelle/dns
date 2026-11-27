@@ -185,6 +185,12 @@ else
 end
 ```
 
+Reuse a validator across lookups to reuse authenticated zone keys. The
+per-validator cache holds up to 256 zones and expires keys at the earliest
+TTL or signature limit in their DNSKEY and DS chain. Each lookup still
+fetches and validates its own answer from the upstream.
+[RFC 4035 §5.3.3](https://www.rfc-editor.org/rfc/rfc4035.html#section-5.3.3)
+
 Only `Secure` results contain authenticated answer records. A `Secure` result
 with response code 3 authenticates NXDOMAIN. An authenticated NODATA result
 has response code 0 and no records of the requested type. `Insecure` indicates
