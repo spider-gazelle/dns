@@ -113,6 +113,28 @@ describe DNS::Resolver::Validating do
     DNS.query("localhost", [DNS::RecordType::MX]).should be_empty
   end
 
+  it "answers search-expanded localhost names without querying upstream" do
+    fixture = DNSSECFixture.new
+    upstream = udp_resolver(fixture.stub)
+    upstream.server_config = DNS::Servers.new(upstream.servers, search: ["LocalHost."], attempts: 1)
+    DNS.default_resolver = DNS::Resolver::Validating.new(upstream)
+
+    answers = DNS.query("app", [a_type, DNS::RecordType::AAAA])
+    answers.map(&.name).uniq!.should eq ["app.localhost"]
+    answers.map(&.ip_address.address).sort!.should eq ["127.0.0.1", "::1"]
+    fixture.stub.request_count.should eq 0
+  ensure
+    fixture.try(&.close)
+  end
+
+  it "rejects malformed localhost names before constructing loopback answers" do
+    DNS.default_resolver = DNS::Resolver::Validating.new(DNS::Resolver::UDP.new([] of String))
+
+    {".localhost", "app..localhost.", "app.localhost..", "#{"x" * 64}.localhost."}.each do |name|
+      expect_raises(ArgumentError, "invalid DNS name length") { DNS.query(name, [a_type]) }
+    end
+  end
+
   it "rejects bogus and insecure replies, including bogus replies with upstream AD" do
     fixture = DNSSECFixture.new(:tampered)
     upstream = udp_resolver(fixture.stub)

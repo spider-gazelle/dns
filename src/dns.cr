@@ -185,18 +185,29 @@ module DNS
   ) : Array(Packet::ResourceRecord)
     requested_types = query_records.map(&.to_u16).to_set
     return [] of Packet::ResourceRecord if requested_types.empty?
-    original_name = normalize_name(domain)
-    if original_name == "localhost" || original_name.ends_with?(".localhost")
-      return loopback_answers(original_name, requested_types)
-    end
     if Socket::IPAddress.valid?(domain)
       raise DNSSEC::ValidationError.new(DNSSEC::Status::Indeterminate, "DNSSEC cannot authenticate an IP literal")
     end
 
-    candidates = resolver.server_config.expand(domain).map { |name| normalize_name(name) }.uniq!
-    search_candidates(candidates, requested_types) do |candidate|
-      resolver.validated_answers(candidate, requested_types)
+    original_name = normalize_dnssec_name(domain)
+    return loopback_answers(original_name, requested_types) if localhost_name?(original_name)
+
+    candidates = resolver.server_config.expand(domain).each.map { |name| normalize_dnssec_name(name) }
+    search_candidates(candidates.uniq, requested_types) do |candidate|
+      if localhost_name?(candidate)
+        loopback_answers(candidate, requested_types)
+      else
+        resolver.validated_answers(candidate, requested_types)
+      end
     end
+  end
+
+  private def self.normalize_dnssec_name(name : String) : String
+    DNSSEC::Wire::Name.from_text(name).query_text.rchop('.')
+  end
+
+  private def self.localhost_name?(name : String) : Bool
+    name == "localhost" || name.ends_with?(".localhost")
   end
 
   # RFC 6761 section 6.3: localhost names always resolve to loopback and are
@@ -211,7 +222,7 @@ module DNS
     end
   end
 
-  private def self.search_candidates(candidates : Array(String), requested_types : Set(UInt16), &) : Array(Packet::ResourceRecord)
+  private def self.search_candidates(candidates : Enumerable(String), requested_types : Set(UInt16), &) : Array(Packet::ResourceRecord)
     first_empty_answer : Array(Packet::ResourceRecord)? = nil
     first_name_error : Packet::NameError? = nil
     candidates.each do |candidate|
