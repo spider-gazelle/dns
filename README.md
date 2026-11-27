@@ -199,6 +199,31 @@ RSA/SHA-512, ECDSA P-256 and P-384, Ed25519, and Ed448. Supported DS digests
 are SHA-256 and SHA-384. NSEC3 is bounded to SHA-1 and 150 iterations.
 [IANA root trust anchors](https://www.iana.org/dnssec/files)
 
+#### Require local DNSSEC validation for `DNS.query`
+
+Install a validating default resolver at startup to require locally
+authenticated answers from both forms of `DNS.query`.
+
+```crystal
+require "dns"
+
+upstream = DNS::Resolver::TLS.new({"8.8.8.8" => "dns.google"})
+DNS.default_resolver = DNS::Resolver::Validating.new(upstream)
+
+answers = DNS.query("example.com.", [DNS::RecordType::A, DNS::RecordType::AAAA])
+```
+
+An `Insecure`, `Bogus`, or `Indeterminate` result raises
+`DNS::DNSSEC::ValidationError` with the corresponding `status`.
+Authenticated NXDOMAIN raises `DNS::Packet::NameError`, and authenticated
+NODATA returns no records of the requested type.
+
+Strict lookups use the configured upstream and its search domains. They
+bypass the hosts file, shared cache, and resolver routes such as mDNS.
+IP literals raise `ValidationError` because they have no DNSSEC proof.
+Use `trust_anchors:` on `DNS::Resolver::Validating.new` for signed private zones.
+`DNS.query_packet` remains available for inspecting raw upstream packets.
+
 Other things to note:
 
 * IPv6 is supported and handled transparently

@@ -82,6 +82,64 @@ private class DNSSECFixture
   end
 end
 
+describe DNS::Resolver::Validating do
+  a_type = DNS::RecordType::A
+
+  it "uses local validation for DNS.query and bypasses hosts, cache, and resolver routes" do
+    fixture = DNSSECFixture.new
+    upstream = udp_resolver(fixture.stub)
+    upstream.server_config = DNS::Servers.new(upstream.servers, search: ["secure.test"], attempts: 1)
+    DNS.default_resolver = DNS::Resolver::Validating.new(upstream, trust_anchors: [DNSSECFixture.anchor])
+
+    name = "www.secure.test"
+    route = /\Awww\.secure\.test\z/
+    DNS.resolvers[route] = DNS::Resolver::UDP.new([] of String)
+    DNS.cache.store(name, DNS::Packet.new(id: 0_u16, response: true, answers: [a_answer(name)]))
+    DNS.query("www", [a_type]).map(&.ip_address.address).sort!.should eq ["192.0.2.3", "192.0.2.4"]
+
+    expect_raises(DNS::DNSSEC::ValidationError) { DNS.query("localhost.", [a_type]) }
+    error = expect_raises(DNS::DNSSEC::ValidationError) { DNS.query("127.0.0.1", [a_type]) }
+    error.status.should eq DNS::DNSSEC::Status::Indeterminate
+  ensure
+    DNS.resolvers.delete(route) if route
+    fixture.try(&.close)
+  end
+
+  it "rejects bogus and insecure replies, including bogus replies with upstream AD" do
+    fixture = DNSSECFixture.new(:tampered)
+    upstream = udp_resolver(fixture.stub)
+    DNS.default_resolver = DNS::Resolver::Validating.new(upstream, trust_anchors: [DNSSECFixture.anchor])
+
+    packet = DNS.query_packet("www.secure.test.", a_type)
+    packet.authenticated_data?.should be_true
+    error = expect_raises(DNS::DNSSEC::ValidationError) { DNS.query("www.secure.test.", [a_type]) }
+    error.status.should eq DNS::DNSSEC::Status::Bogus
+
+    error = expect_raises(DNS::DNSSEC::ValidationError) { DNS.query("host.unsigned.test.", [a_type]) }
+    error.status.should eq DNS::DNSSEC::Status::Insecure
+  ensure
+    fixture.try(&.close)
+  end
+
+  it "preserves authenticated denials and validates all types before yielding records" do
+    fixture = DNSSECFixture.new
+    upstream = udp_resolver(fixture.stub)
+    DNS.default_resolver = DNS::Resolver::Validating.new(upstream, trust_anchors: [DNSSECFixture.anchor])
+
+    DNS.query("secure.test.", [DNS::RecordType::AAAA]).should be_empty
+    expect_raises(DNS::Packet::NameError) { DNS.query("missing.secure.test.", [a_type]) }
+
+    yielded = [] of DNS::Packet::ResourceRecord
+    error = expect_raises(DNS::DNSSEC::ValidationError) do
+      DNS.query("www.secure.test.", [a_type, DNS::RecordType::RRSIG]) { |record| yielded << record }
+    end
+    error.status.should eq DNS::DNSSEC::Status::Indeterminate
+    yielded.should be_empty
+  ensure
+    fixture.try(&.close)
+  end
+end
+
 describe DNS::DNSSEC::Validator do
   it "validates an RSA trust anchor, ECDSA delegation and RRset with its original signed TTL" do
     fixture = DNSSECFixture.new

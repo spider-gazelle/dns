@@ -6,7 +6,7 @@ module DNS::DNSSEC
     Indeterminate
   end
 
-  class ValidationError < Exception
+  class ValidationError < Packet::Error
     getter status : Status
 
     def initialize(@status : Status, message : String)

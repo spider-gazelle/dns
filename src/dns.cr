@@ -113,11 +113,19 @@ module DNS
   # Automatically expands domain names using the resolver's search domains and ndots settings.
   # Tries expanded candidates in order until one answers a requested record type.
   # Network results are cached under the candidate name and its resolver.
+  # Set `default_resolver` to `Resolver::Validating` to require local DNSSEC
+  # validation for every answer, bypassing the hosts file, cache, and routes.
   #
   # NOTE:: A or AAAA answers may include cname and other records that are not directly relevent to the query.
   # It is up to the consumer to filter for the relevant results
   # ameba:disable Metrics/CyclomaticComplexity
   def self.query(domain : String, query_records : Enumerable(RecordType | UInt16), &) : Nil
+    fallback = default_resolver
+    if fallback.is_a?(Resolver::Validating)
+      query_validated(domain, query_records, fallback).each { |answer| yield answer }
+      return
+    end
+
     if Socket::IPAddress.valid?(domain)
       record_type = Socket::IPAddress.valid_v4?(domain) ? RecordType::A : RecordType::AAAA
       record_type_int = record_type.to_u16
@@ -151,7 +159,7 @@ module DNS
 
     return if queries_to_send.empty?
 
-    resolver = select_resolver(domain)
+    resolver = select_resolver(domain, fallback: fallback)
     candidates = resolver.server_config.expand(domain).map { |name| normalize_name(name) }.uniq!
     cache_local = cache
     if candidates.size == 1
@@ -161,27 +169,46 @@ module DNS
       return
     end
 
-    first_empty_answer : Array(Packet::ResourceRecord)? = nil
-    first_name_error : Packet::NameError? = nil
     requested_types = queries_to_send.values.to_set
-    candidates.each do |candidate|
+    search_candidates(candidates, requested_types) do |candidate|
       candidate_resolver = candidate == original_name ? resolver : select_resolver(candidate, fallback: resolver)
       answers = [] of Packet::ResourceRecord
       query_candidate(candidate, queries_to_send, candidate_resolver, cache_local) { |answer| answers << answer }
-      if answers.any? { |answer| requested_types.includes?(answer.type) }
-        answers.each { |answer| yield answer }
-        return
-      end
+      answers
+    end.each { |answer| yield answer }
+  end
+
+  private def self.query_validated(
+    domain : String,
+    query_records : Enumerable(RecordType | UInt16),
+    resolver : Resolver::Validating,
+  ) : Array(Packet::ResourceRecord)
+    requested_types = query_records.map(&.to_u16).to_set
+    return [] of Packet::ResourceRecord if requested_types.empty?
+    if Socket::IPAddress.valid?(domain)
+      raise DNSSEC::ValidationError.new(DNSSEC::Status::Indeterminate, "DNSSEC cannot authenticate an IP literal")
+    end
+
+    candidates = resolver.server_config.expand(domain).map { |name| normalize_name(name) }.uniq!
+    search_candidates(candidates, requested_types) do |candidate|
+      resolver.validated_answers(candidate, requested_types)
+    end
+  end
+
+  private def self.search_candidates(candidates : Array(String), requested_types : Set(UInt16), &) : Array(Packet::ResourceRecord)
+    first_empty_answer : Array(Packet::ResourceRecord)? = nil
+    first_name_error : Packet::NameError? = nil
+    candidates.each do |candidate|
+      answers = yield candidate
+      return answers if answers.any? { |answer| requested_types.includes?(answer.type) }
       first_empty_answer ||= answers
     rescue ex : Packet::NameError
       first_name_error ||= ex
     end
 
-    if first_empty_answer
-      first_empty_answer.each { |answer| yield answer }
-    elsif first_name_error
-      raise first_name_error
-    end
+    return first_empty_answer if first_empty_answer
+    raise first_name_error if first_name_error
+    [] of Packet::ResourceRecord
   end
 
   private def self.normalize_name(name : String) : String
@@ -249,7 +276,7 @@ module DNS
 
   # Query a fully qualified name and return the upstream packet, including
   # DNSSEC flags and authority records. Packet queries bypass the library's
-  # hosts file, response cache, and search suffixes.
+  # hosts file, response cache, search suffixes, and local DNSSEC validation.
   # NXDOMAIN and other non-retryable DNS responses are returned as packets.
   def self.query_packet(
     domain : String,
@@ -258,6 +285,7 @@ module DNS
     resolver : Resolver = select_resolver(domain),
     dnssec : DNSSEC::Options = DNSSEC::Options.new,
   ) : Packet
+    resolver = resolver.upstream if resolver.is_a?(Resolver::Validating)
     name = normalize_name(domain)
     fetch = {Random::Secure.rand(UInt16) => record.to_u16}
     packet : Packet? = nil
