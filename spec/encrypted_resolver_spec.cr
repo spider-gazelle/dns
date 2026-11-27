@@ -30,6 +30,7 @@ describe DNS::Resolver::TLS do
     tcp = TCPServer.new("127.0.0.1", 0)
     server_context, client_context = loopback_tls_contexts
     options_seen = [] of DNS::Packet::EDNS::Option
+    dnssec_flags_seen = [] of {Bool, Bool, Bool}
     spawn do
       client = tcp.accept
       client.read_timeout = 3.seconds
@@ -38,6 +39,9 @@ describe DNS::Resolver::TLS do
         aaaa = read_dns_frame(tls)
         options_seen.concat(a.edns.try(&.options) || [] of DNS::Packet::EDNS::Option)
         options_seen.concat(aaaa.edns.try(&.options) || [] of DNS::Packet::EDNS::Option)
+        [a, aaaa].each do |query|
+          dnssec_flags_seen << {query.edns.try(&.dnssec_ok?) || false, query.authenticated_data?, query.checking_disabled?}
+        end
         wrong = DNS::Packet::Question.new("other.test", 28_u16)
         write_dns_frame(tls, dns_response(aaaa, questions: [wrong], answers: [aaaa_answer("other.test")]))
         aaaa_reply = dns_response(aaaa, answers: [aaaa_answer("records.test")])
@@ -53,9 +57,11 @@ describe DNS::Resolver::TLS do
     padding = DNS::Packet::EDNS::Option.new(12_u16, Bytes[0, 0])
     resolver.edns_options = [padding]
     responses = [] of DNS::Packet
-    resolver.query("records.test", "127.0.0.1", {7_u16 => 1_u16, 8_u16 => 28_u16}, 3.seconds) { |packet| responses << packet }
+    dnssec = DNS::DNSSEC::Options.new(dnssec_ok: true, request_ad: true)
+    resolver.query("records.test", "127.0.0.1", {7_u16 => 1_u16, 8_u16 => 28_u16}, 3.seconds, dnssec: dnssec) { |packet| responses << packet }
     responses.map(&.id).should eq [8_u16, 7_u16]
     options_seen.should eq [padding, padding]
+    dnssec_flags_seen.should eq [{true, true, false}, {true, true, false}]
     responses.flat_map(&.answers).map(&.ip_address.address).should eq ["2001:db8::1", "93.184.216.34"]
   ensure
     tcp.try(&.close)
@@ -65,11 +71,14 @@ end
 describe DNS::Resolver::HTTPS do
   it "bootstraps a named HTTPS endpoint through system DNS only while connecting" do
     server_context, client_context = loopback_tls_contexts
+    dnssec_flags_seen = [] of {Bool, Bool, Bool}
     server = HTTP::Server.new do |context|
       body = context.request.body || raise "missing DNS request body"
       query = DNS::Packet.from_io(body)
+      dnssec_flags_seen << {query.edns.try(&.dnssec_ok?) || false, query.authenticated_data?, query.checking_disabled?}
       context.response.content_type = "application/dns-message"
-      context.response.write(dns_response(query, answers: [a_answer(query.questions.first.name)]))
+      context.response.write(dns_response(query, answers: [a_answer(query.questions.first.name)],
+        additionals: [DNS::Packet::EDNS.new.to_resource_record], authenticated_data: true))
     end
     port = server.bind_tls("127.0.0.1", 0, server_context).port
     spawn { server.listen }
@@ -83,7 +92,11 @@ describe DNS::Resolver::HTTPS do
 
     endpoint = "https://localhost:#{port}/dns-query"
     DNS.default_resolver = DNS::Resolver::HTTPS.new([endpoint], tls_context: client_context)
-    DNS.query("records.test.", [DNS::RecordType::A]).map(&.ip_address.address).should eq ["93.184.216.34"]
+    dnssec = DNS::DNSSEC::Options.new(dnssec_ok: true, request_ad: true, checking_disabled: true)
+    packet = DNS.query_packet("records.test.", DNS::RecordType::A, dnssec: dnssec)
+    packet.answers.map(&.ip_address.address).should eq ["93.184.216.34"]
+    packet.authenticated_data?.should be_true
+    dnssec_flags_seen.should eq [{true, true, true}]
     expect_raises(IO::Error, "no DNS servers configured") do
       Socket::Addrinfo.tcp("localhost", port)
     end

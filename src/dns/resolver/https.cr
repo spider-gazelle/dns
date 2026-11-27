@@ -18,6 +18,18 @@ class DNS::Resolver::HTTPS < DNS::Resolver
     timeout : Time::Span = ::DNS.timeout,
     & : DNS::Packet ->
   )
+    query(domain, dns_server, fetch, timeout, dnssec: DNSSEC::Options.new) { |response| yield response }
+  end
+
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span = ::DNS.timeout,
+    *,
+    dnssec : DNSSEC::Options,
+    & : DNS::Packet ->
+  )
     uri = URI.parse(dns_server)
     hostname = uri.hostname || raise ArgumentError.new("DNS-over-HTTPS endpoint requires a hostname")
     client = HTTP::Client.new(uri, tls: @tls_context)
@@ -29,7 +41,7 @@ class DNS::Resolver::HTTPS < DNS::Resolver
     begin
       fetch.each do |id, record|
         # Build the DNS query bytes
-        query_bytes = DNS::Packet::Question.build_query(domain, record, 0_u16, edns: query_edns)
+        query_bytes = DNS::Packet::Question.build_query(domain, record, 0_u16, edns: query_edns, dnssec: dnssec)
 
         # Build the HTTP request
         request = HTTP::Request.new("POST", uri.request_target)

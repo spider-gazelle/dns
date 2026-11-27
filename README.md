@@ -140,6 +140,32 @@ lookup raises.
 address hints. Pass the parameter keys your application can honor to
 `compatible?(supported_keys)` before using a service binding.
 
+### DNSSEC-aware queries
+
+Use `DNS.query_packet` to inspect the upstream's DNSSEC flags and the records
+in its answer and authority sections. This lookup treats the name as fully
+qualified and bypasses the library's hosts file and cache.
+
+```crystal
+resolver = DNS::Resolver::TLS.new({"8.8.8.8" => "dns.google"})
+options = DNS::DNSSEC::Options.new(request_ad: true)
+packet = DNS.query_packet("example.com.", DNS::RecordType::A, resolver: resolver, dnssec: options)
+packet.raise_on_error!
+puts packet.authenticated_data?
+```
+
+`request_ad: true` asks the upstream to report the outcome of validation using
+the Authenticated Data (AD) bit. The configured recursive resolver performs
+signature validation. Rely on AD only with a trusted validating upstream over
+an authenticated connection such as certificate-verified TLS or HTTPS.
+[RFC 4035](https://www.rfc-editor.org/rfc/rfc4035.html#section-4.9) · [RFC 6840](https://www.rfc-editor.org/rfc/rfc6840.html#section-5.7)
+
+`dnssec_ok: true` sets the EDNS DO bit to request DNSSEC records. These lookups
+keep EDNS on UDP retries and TCP fallback. RRSIG, DNSKEY, DS, and authenticated
+denial records are available through their resource record type and raw
+`resource_data`. `checking_disabled: true` sets CD for diagnostics when the
+application needs the data the upstream would otherwise withhold.
+
 Other things to note:
 
 * IPv6 is supported and handled transparently

@@ -39,14 +39,26 @@ class DNS::Resolver::UDP < DNS::Resolver
     timeout : Time::Span = ::DNS.timeout,
     & : DNS::Packet ->
   )
+    query(domain, dns_server, fetch, timeout, dnssec: DNSSEC::Options.new) { |response| yield response }
+  end
+
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span = ::DNS.timeout,
+    *,
+    dnssec : DNSSEC::Options,
+    & : DNS::Packet ->
+  )
     return if fetch.empty?
 
     server = Socket::IPAddress.new(dns_server, port.to_i)
     peer = cookie_peer(server) if managed_cookies?
     cookie = @cookie_jar.option(peer) if peer
     edns = udp_edns(cookie)
-    legacy = edns_options.empty? && (!cookie || cookie.data.size == CookieJar::CLIENT_SIZE)
-    exchange = Exchange.new(server, domain, fetch, timeout, legacy: legacy, cookie_peer: peer)
+    legacy = !dnssec.dnssec_ok? && edns_options.empty? && (!cookie || cookie.data.size == CookieJar::CLIENT_SIZE)
+    exchange = Exchange.new(server, domain, fetch, timeout, dnssec, legacy: legacy, cookie_peer: peer)
     fetch.each { |id, type| exchange.send(id, type, edns) }
 
     until exchange.outstanding.empty?
@@ -122,7 +134,7 @@ class DNS::Resolver::UDP < DNS::Resolver
 
   private def refetch(exchange : Exchange, type : UInt16, id : UInt16, udp_size : UInt16) : DNS::Packet
     server = exchange.server
-    tcp_query(server, exchange.domain, id, type, remaining_time(exchange.deadline), edns_udp_size: udp_size) ||
+    tcp_query(server, exchange.domain, id, type, remaining_time(exchange.deadline), edns_udp_size: udp_size, dnssec: exchange.dnssec) ||
       raise IO::Error.new("DNS TCP fallback failed for #{server.address}")
   end
 
@@ -137,6 +149,7 @@ class DNS::Resolver::UDP < DNS::Resolver
     timeout : Time::Span,
     *,
     edns_udp_size : UInt16 = EDNS_UDP_SIZE,
+    dnssec : DNSSEC::Options = DNSSEC::Options.new,
   ) : DNS::Packet?
     deadline = Time.instant + timeout
     socket = TCPSocket.new(server.family)
@@ -145,7 +158,7 @@ class DNS::Resolver::UDP < DNS::Resolver
       socket.tcp_nodelay = true
       socket.connect(server, timeout: remaining_time(deadline))
       edns = EDNS.new(edns_udp_size, edns_options) unless edns_udp_size.zero?
-      query = DNS::Packet::Question.build_query(domain, record, id, edns: edns)
+      query = DNS::Packet::Question.build_query(domain, record, id, edns: edns, dnssec: dnssec)
       write_tcp_query(socket, query, deadline)
 
       packet = read_tcp_response(socket, deadline)
@@ -220,6 +233,7 @@ class DNS::Resolver::UDP < DNS::Resolver
       channel : Channel(Reply),
       *,
       edns : EDNS?,
+      dnssec : DNSSEC::Options = DNSSEC::Options.new,
     ) : UInt16
       socket = socket_for(server.family)
 
@@ -236,7 +250,7 @@ class DNS::Resolver::UDP < DNS::Resolver
       end
 
       begin
-        query_bytes = DNS::Packet::Question.build_query(domain, record, wire_id, edns: edns)
+        query_bytes = DNS::Packet::Question.build_query(domain, record, wire_id, edns: edns, dnssec: dnssec)
         socket.send(query_bytes, server)
       rescue ex
         cancel({wire_id})

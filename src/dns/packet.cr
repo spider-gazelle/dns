@@ -19,6 +19,7 @@ struct DNS::Packet
   # RA: Recursion Available flag
   # In a response, this flag indicates whether the server supports recursion.
   getter? recursion_available : Bool
+  # The original three-bit Z field, including the AD and CD bits.
   getter reserved_z : UInt8 = 0_u8
 
   # RCODE: Packet code (error indication)
@@ -44,7 +45,7 @@ struct DNS::Packet
     @truncation = (flags >> 9) & 0b1 == 1            # TC (1 bit) - Truncation
     @recursion_desired = (flags >> 8) & 0b1 == 1     # RD (1 bit) - Recursion Desired
     @recursion_available = (flags >> 7) & 0b1 == 1   # RA (1 bit) - Recursion Available
-    @reserved_z = ((flags >> 4) & 0b111).to_u8       # Z (3 bits) - Reserved (should be 0)
+    @reserved_z = ((flags >> 4) & 0b111).to_u8       # Z, AD, CD
     @response_code = (flags & 0b1111).to_u8          # RCODE (4 bits) - Response Code
     @edns = EDNS.from_additionals(@additionals)
   end
@@ -62,8 +63,13 @@ struct DNS::Packet
     @answers : Array(DNS::Packet::ResourceRecord) = [] of DNS::Packet::ResourceRecord,
     @authorities : Array(DNS::Packet::ResourceRecord) = [] of DNS::Packet::ResourceRecord,
     @additionals : Array(DNS::Packet::ResourceRecord) = [] of DNS::Packet::ResourceRecord,
+    *,
+    authenticated_data : Bool = false,
+    checking_disabled : Bool = false,
   )
     @operation_code = operation_code.is_a?(Enum) ? operation_code.value : operation_code.to_u8
+    @reserved_z |= 0b010_u8 if authenticated_data
+    @reserved_z |= 0b001_u8 if checking_disabled
     @edns = EDNS.from_additionals(@additionals)
   end
 
@@ -139,7 +145,7 @@ struct DNS::Packet
     rd = @recursion_desired ? 1_u8 : 0_u8
     ra = @recursion_available ? 1_u8 : 0_u8
     io.write_byte((qr << 7) | (@operation_code << 3) | (aa << 2) | (tc << 1) | rd)
-    io.write_byte((ra << 7) | response_code)
+    io.write_byte((ra << 7) | (reserved_z << 4) | response_code)
 
     io.write_bytes(@questions.size.to_u16, IO::ByteFormat::BigEndian)
     io.write_bytes(@answers.size.to_u16, IO::ByteFormat::BigEndian)
@@ -156,6 +162,16 @@ struct DNS::Packet
   # This field specifies whether this message is a query (0) or a response (1).
   def query? : Bool
     !response?
+  end
+
+  # The AD bit received from the upstream. Interpret it only for a trusted
+  # upstream reached over an authenticated transport.
+  def authenticated_data? : Bool
+    reserved_z.bits_set?(0b010_u8)
+  end
+
+  def checking_disabled? : Bool
+    reserved_z.bits_set?(0b001_u8)
   end
 
   # Extract the Opcode from the flags (bits 1 to 4).
