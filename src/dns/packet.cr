@@ -30,6 +30,8 @@ struct DNS::Packet
   getter authorities : Array(DNS::Packet::ResourceRecord)
   getter additionals : Array(DNS::Packet::ResourceRecord)
   getter edns : EDNS?
+  # :nodoc:
+  getter wire_bytes : Bytes? = nil
 
   def initialize(
     @id : UInt16,
@@ -38,6 +40,8 @@ struct DNS::Packet
     @answers : Array(DNS::Packet::ResourceRecord),
     @authorities : Array(DNS::Packet::ResourceRecord),
     @additionals : Array(DNS::Packet::ResourceRecord),
+    *,
+    @wire_bytes : Bytes? = nil,
   )
     @response = (flags >> 15) & 0b1 == 1             # QR (1 bit) - Response flag
     @operation_code = ((flags >> 11) & 0b1111).to_u8 # Opcode (4 bits)
@@ -107,7 +111,7 @@ struct DNS::Packet
     authorities = read_records(io, authorities_count)
     additionals = read_records(io, additionals_count)
 
-    DNS::Packet.new(id, flags, questions, answers, authorities, additionals)
+    DNS::Packet.new(id, flags, questions, answers, authorities, additionals, wire_bytes: io.to_slice[0, io.pos])
   end
 
   private def self.read_records(io : IO::Memory, count : UInt16) : Array(ResourceRecord)

@@ -166,6 +166,38 @@ denial records are available through their resource record type and raw
 `resource_data`. `checking_disabled: true` sets CD for diagnostics when the
 application needs the data the upstream would otherwise withhold.
 
+### Local DNSSEC validation
+
+`DNS::DNSSEC::Validator` verifies DNSSEC locally. It uses a recursive resolver
+to fetch the answer, DS records, and DNSKEY RRsets. It verifies signatures
+from a configured trust anchor and checks NSEC or NSEC3 proofs for negative
+answers and wildcard expansion. [RFC 4035](https://www.rfc-editor.org/rfc/rfc4035.html#section-5) · [RFC 5155](https://www.rfc-editor.org/rfc/rfc5155.html#section-8)
+
+```crystal
+resolver = DNS::Resolver::TLS.new({"8.8.8.8" => "dns.google"})
+validator = DNS::DNSSEC::Validator.new(resolver)
+result = validator.query("example.com.", DNS::RecordType::A)
+
+if result.secure?
+  puts result.answers.select(&.record_type.a?).map(&.ip_address)
+else
+  puts "#{result.status} - #{result.reason}"
+end
+```
+
+Only `Secure` results contain authenticated answer records. A `Secure` result
+with response code 3 authenticates NXDOMAIN. An authenticated NODATA result
+has response code 0 and no records of the requested type. `Insecure` indicates
+an authenticated unsigned delegation, `Bogus` indicates failed verification,
+and `Indeterminate` means validation could not be completed.
+
+The validator uses the bundled IANA root DS snapshot by default. Supply
+`trust_anchors:` with an array of `DNS::DNSSEC::TrustAnchor` entries to update
+the snapshot or validate a private zone. Supported signatures are RSA/SHA-256,
+RSA/SHA-512, ECDSA P-256 and P-384, Ed25519, and Ed448. Supported DS digests
+are SHA-256 and SHA-384. NSEC3 is bounded to SHA-1 and 150 iterations.
+[IANA root trust anchors](https://www.iana.org/dnssec/files)
+
 Other things to note:
 
 * IPv6 is supported and handled transparently
