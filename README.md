@@ -188,8 +188,9 @@ end
 Only `Secure` results contain authenticated answer records. A `Secure` result
 with response code 3 authenticates NXDOMAIN. An authenticated NODATA result
 has response code 0 and no records of the requested type. `Insecure` indicates
-an authenticated unsigned delegation, `Bogus` indicates failed verification,
-and `Indeterminate` means validation could not be completed.
+an authenticated unsigned delegation, or a delegation whose authenticated DS
+records use only unsupported algorithms or digests. `Bogus` indicates failed
+verification, and `Indeterminate` means validation could not be completed.
 
 The validator uses the bundled IANA root DS snapshot by default. Supply
 `trust_anchors:` with an array of `DNS::DNSSEC::TrustAnchor` entries to update

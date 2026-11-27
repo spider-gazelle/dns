@@ -220,7 +220,8 @@ module DNS::DNSSEC
       end
 
       private def nsec3_negative(name : Wire::Name, type : UInt16, code : UInt16, delegation : Bool, parameters : HashParameters, records : Array(NSEC3)) : Status?
-        if exact = records.find { |record| record.hash_name == parameters.hash_name(name) }
+        hash = parameters.hash_name(name)
+        if exact = records.find { |record| record.hash_name == hash }
           return exact_status(exact.types, type, delegation) if code.zero?
           return
         end

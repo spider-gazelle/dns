@@ -155,7 +155,7 @@ module DNS::DNSSEC
 
     private def validate_synthesis(answers : Array(Packet::ResourceRecord), chain : Array(RR), target : Name, owner : Name, message : Message) : Nil
       records = message.answer(owner, RecordType::DNAME.value)
-      ttl = authenticate(records, message.answers, message)
+      ttl = authenticate_answer(records, message)
       prefix = chain.first.name.labels.first(chain.first.name.size - owner.size)
       replacement = Name.new(prefix + alias_target(records).labels)
       if target != replacement || replacement.labels.sum { |label| label.bytesize + 1 } >= 255
@@ -231,13 +231,18 @@ module DNS::DNSSEC
       authenticate(records, message.answers, message, parent_only: true)
       ds = records.map { |record| Crypto::DS.parse(record.data) }
       return ds if ds.any?(&.supported?)
-      raise ValidationError.new(Status::Indeterminate, "no supported DS digest and signature algorithm for #{zone}")
+      # RFC 6840 section 5.2: treat this like an authenticated unsigned delegation.
+      raise ValidationError.new(Status::Insecure, "no supported DS digest and signature algorithm for #{zone}")
     end
 
     private def add_authenticated(result : Array(Packet::ResourceRecord), records : Array(RR), message : Message) : Nil
-      parent_only = records.first.type == RecordType::DS.value && records.first.name.size > 0
-      ttl = authenticate(records, message.answers, message, parent_only: parent_only)
+      ttl = authenticate_answer(records, message)
       records.each { |record| result << record.public_record(ttl) }
+    end
+
+    private def authenticate_answer(records : Array(RR), message : Message) : UInt32
+      parent_only = records.first.type == RecordType::DS.value && records.first.name.size > 0
+      authenticate(records, message.answers, message, parent_only: parent_only)
     rescue ex : ValidationError
       if ex.status.bogus? && unsigned_ancestor?(records.first.name)
         raise ValidationError.new(Status::Insecure, "answer is below an authenticated unsigned delegation")
@@ -283,11 +288,12 @@ module DNS::DNSSEC
 
     private def authenticate_signature(records : Array(RR), signature : Signature, message : Message) : UInt32
       name = records.first.name
+      keys = keys_for(signature.signer)
       unless Crypto.supported?(signature.algorithm)
         raise ValidationError.new(Status::Indeterminate, "unsupported DNSSEC signature algorithm #{signature.algorithm}")
       end
       signed_owner = signed_owner_for(name, signature)
-      if !signed_owner || !(ttl = verify(records, signature, keys_for(signature.signer), signed_owner))
+      if !signed_owner || !(ttl = verify(records, signature, keys, signed_owner))
         raise ValidationError.new(Status::Bogus, "DNSSEC signature failed for #{name}")
       end
       return ttl if signed_owner == name
@@ -308,9 +314,11 @@ module DNS::DNSSEC
       owner if owner.within?(signature.signer)
     end
 
+    # DS data belongs to the parent zone, so it chains from the parent's anchor
+    # even when the child is itself a configured trust anchor.
     private def authorized_signer?(name : Name, signer : Name, parent_only : Bool) : Bool
-      name.within?(signer) && (!parent_only || signer.size < name.size) &&
-        signer.within?(anchor_for(name))
+      return false if !name.within?(signer) || (parent_only && signer.size >= name.size)
+      signer.within?(anchor_for(parent_only ? name.suffix(name.size - 1) : name))
     end
 
     private def verify(records : Array(RR), signature : Signature, keys : Array(Key), owner : Name) : UInt32?
@@ -338,12 +346,13 @@ module DNS::DNSSEC
       denial_records.group_by { |record| {record.name, record.type} }.each_value do |rrset|
         signatures(rrset, message.authorities).each do |signature|
           next unless proof_signer?(rrset.first.name, name, signature, parent_only, only)
-          unless Crypto.supported?(signature.algorithm)
-            error ||= ValidationError.new(Status::Indeterminate, "unsupported DNSSEC denial signature algorithm #{signature.algorithm}")
-            next
-          end
           begin
-            if verify(rrset, signature, keys_for(signature.signer), rrset.first.name)
+            keys = keys_for(signature.signer)
+            unless Crypto.supported?(signature.algorithm)
+              error ||= ValidationError.new(Status::Indeterminate, "unsupported DNSSEC denial signature algorithm #{signature.algorithm}")
+              next
+            end
+            if verify(rrset, signature, keys, rrset.first.name)
               (authenticated[signature.signer] ||= [] of RR).concat(rrset)
               break
             end

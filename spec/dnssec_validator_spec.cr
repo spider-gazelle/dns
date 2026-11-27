@@ -15,11 +15,25 @@ private class DNSSECFixture
     @stub.serve_udp { |query, _, _| reply(query) }
   end
 
-  def validator(*, anchor_name = "anchor", sha384 = false) : DNS::DNSSEC::Validator
+  def self.anchor(anchor_name = "anchor", *, sha384 = false) : DNS::DNSSEC::TrustAnchor
     row = FIXTURE[anchor_name].as_a
     digest = sha384 ? FIXTURE["anchor_sha384"] : row[4]
-    anchor = DNS::DNSSEC::TrustAnchor.new(row[0].as_s, row[1].as_i.to_u16, row[2].as_i.to_u8, sha384 ? 4_u8 : row[3].as_i.to_u8, digest.as_s.hexbytes)
-    DNS::DNSSEC::Validator.new(udp_resolver(stub), trust_anchors: [anchor])
+    DNS::DNSSEC::TrustAnchor.new(row[0].as_s, row[1].as_i.to_u16, row[2].as_i.to_u8, sha384 ? 4_u8 : row[3].as_i.to_u8, digest.as_s.hexbytes)
+  end
+
+  def validator(*, anchor_name = "anchor", sha384 = false) : DNS::DNSSEC::Validator
+    validator_for([DNSSECFixture.anchor(anchor_name, sha384: sha384)])
+  end
+
+  def validator_for(anchors : Array(DNS::DNSSEC::TrustAnchor)) : DNS::DNSSEC::Validator
+    DNS::DNSSEC::Validator.new(udp_resolver(stub), trust_anchors: anchors)
+  end
+
+  # Turns a fixture DS record into a configured trust anchor.
+  def self.ds_anchor(query : String) : DNS::DNSSEC::TrustAnchor
+    name, _, _, wire = FIXTURE["queries"][query][1][0].as_a
+    data = wire.as_s.hexbytes
+    DNS::DNSSEC::TrustAnchor.new(name.as_s, IO::ByteFormat::BigEndian.decode(UInt16, data[0, 2]), data[2], data[3], data[4..])
   end
 
   def close : Nil
@@ -220,6 +234,38 @@ describe DNS::DNSSEC::Validator do
       result.status.should eq DNS::DNSSEC::Status::Insecure
       result.answers.should be_empty
     end
+  ensure
+    fixture.try(&.close)
+  end
+
+  it "classifies a delegation with only unsupported DS algorithms as insecure" do
+    fixture = DNSSECFixture.new
+    result = fixture.validator(anchor_name: "anchor_algorithm").query("www.legacy.algorithm.test.", DNS::RecordType::A, now: DNSSECFixture::NOW)
+    result.status.should eq DNS::DNSSEC::Status::Insecure
+    result.answers.should be_empty
+  ensure
+    fixture.try(&.close)
+  end
+
+  it "classifies DNAME synthesis below an unsigned delegation as insecure" do
+    fixture = DNSSECFixture.new
+    result = fixture.validator.query("leaf.redirect.unsigned.test.", DNS::RecordType::A, now: DNSSECFixture::NOW)
+    result.status.should eq DNS::DNSSEC::Status::Insecure
+    result.answers.should be_empty
+  ensure
+    fixture.try(&.close)
+  end
+
+  it "validates the DS RRset of a configured trust anchor through its parent" do
+    fixture = DNSSECFixture.new
+    anchors = [DNSSECFixture.anchor, DNSSECFixture.ds_anchor("secure.test. 43")]
+    result = fixture.validator_for(anchors).query("secure.test.", DNS::RecordType::DS, now: DNSSECFixture::NOW)
+    result.status.should eq DNS::DNSSEC::Status::Secure
+    result.answers.map(&.record_type).should eq [DNS::RecordType::DS]
+
+    # Without an anchor above it, the DS RRset cannot be validated.
+    result = fixture.validator_for(anchors[1..]).query("secure.test.", DNS::RecordType::DS, now: DNSSECFixture::NOW)
+    result.status.should eq DNS::DNSSEC::Status::Indeterminate
   ensure
     fixture.try(&.close)
   end
