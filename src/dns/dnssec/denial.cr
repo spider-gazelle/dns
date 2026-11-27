@@ -6,26 +6,6 @@ module DNS::DNSSEC
     extend self
 
     record Types, values : Set(UInt16) do
-      def self.read(io : IO::Memory) : self
-        values = Set(UInt16).new
-        previous = -1
-        until io.pos == io.size
-          window = io.read_bytes(UInt8, Wire::FORMAT).to_i
-          size = io.read_bytes(UInt8, Wire::FORMAT).to_i
-          raise IO::Error.new("invalid DNSSEC type bitmap") unless window > previous && size.in?(1..32)
-          previous = window
-          bitmap = Bytes.new(size)
-          io.read_fully(bitmap)
-          raise IO::Error.new("invalid trailing zero in DNSSEC type bitmap") if bitmap[-1].zero?
-          bitmap.each_with_index do |byte, index|
-            8.times do |bit|
-              values.add((window * 256 + index * 8 + bit).to_u16) if byte.bits_set?(0x80_u8 >> bit)
-            end
-          end
-        end
-        new(values)
-      end
-
       def delegation? : Bool
         values.includes?(RecordType::NS.value) && !values.includes?(RecordType::SOA.value)
       end
@@ -46,10 +26,10 @@ module DNS::DNSSEC
 
       def initialize(record : Wire::RR, zone : Wire::Name)
         @name = record.name
-        io = IO::Memory.new(record.data)
-        @next_name = Wire::Name.read(io, record.data, compression: false)
-        @types = Types.read(io)
-        if !name.within?(zone) || !next_name.within?(zone) || types.values.empty?
+        nsec = Resource::NSEC.new(record.data, record.data)
+        @next_name = Wire::Name.new(nsec.next_domain_labels)
+        @types = Types.new(nsec.types)
+        if !name.within?(zone) || !next_name.within?(zone)
           raise IO::Error.new("NSEC record lies outside its signing zone")
         end
       end
@@ -82,28 +62,20 @@ module DNS::DNSSEC
       getter? opt_out : Bool
 
       def initialize(record : Wire::RR, zone : Wire::Name)
-        io = IO::Memory.new(record.data)
-        algorithm = io.read_bytes(UInt8, Wire::FORMAT)
-        flags = io.read_bytes(UInt8, Wire::FORMAT)
-        iterations = io.read_bytes(UInt16, Wire::FORMAT)
-        if algorithm != 1 || flags > 1 || iterations > 150
+        nsec = Resource::NSEC3.new(record.data, record.data)
+        if nsec.hash_algorithm != 1 || nsec.flags > 1 || nsec.iterations > 150
           raise ValidationError.new(Status::Indeterminate, "unsupported NSEC3 hash, flags, or iteration count")
         end
 
-        @opt_out = flags == 1
-        salt = Bytes.new(io.read_bytes(UInt8, Wire::FORMAT))
-        io.read_fully(salt)
-        @parameters = HashParameters.new(iterations, salt)
-        length = io.read_bytes(UInt8, Wire::FORMAT)
-        raise IO::Error.new("invalid NSEC3 hash size") unless length == 20
-        hash = Bytes.new(length)
-        io.read_fully(hash)
+        @opt_out = nsec.opt_out?
+        @parameters = HashParameters.new(nsec.iterations, nsec.salt)
+        raise IO::Error.new("invalid NSEC3 hash size") unless nsec.next_hash.size == 20
         @hash_name = record.name.labels.first? || ""
         unless record.name.size == zone.size + 1 && record.name.within?(zone) && hash_name.matches?(/\A[0-9a-v]{32}\z/)
           raise IO::Error.new("invalid NSEC3 owner")
         end
-        @next_hash = Denial.base32hex(hash)
-        @types = Types.read(io)
+        @next_hash = Denial.base32hex(nsec.next_hash)
+        @types = Types.new(nsec.types)
       end
 
       def covers?(hash : String) : Bool

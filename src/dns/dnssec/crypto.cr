@@ -16,93 +16,59 @@ module DNS::DNSSEC
   module Crypto
     extend self
 
-    record Key, data : Bytes do
-      def algorithm : UInt8
-        data[3]
-      end
+    alias Key = Resource::DNSKEY
+    alias DS = Resource::DS
 
-      def material : Bytes
-        data[4..]
-      end
-
-      def usable? : Bool
-        data.size > 4 && data[2] == 3 && data[0].bits_set?(1_u8) && !data[1].bits_set?(0x80_u8)
-      end
-
-      def tag : UInt16
-        checksum = 0_u32
-        data.each_with_index do |byte, index|
-          checksum += index.even? ? byte.to_u32 << 8 : byte
-        end
-        ((checksum + (checksum >> 16)) & 0xffff).to_u16
-      end
+    def usable?(key : Key) : Bool
+      key.protocol == 3 && key.zone_key? && !key.revoked?
     end
 
-    record DS, key_tag : UInt16, algorithm : UInt8, digest_type : UInt8, digest : Bytes do
-      def self.parse(data : Bytes) : self
-        raise IO::Error.new("short DS record") if data.size < 5
-        new(Wire::FORMAT.decode(UInt16, data[0, 2]), data[2], data[3], data[4..])
-      end
+    def supported?(ds : DS) : Bool
+      ds.digest_type.in?({2_u8, 4_u8}) && supported?(ds.algorithm)
+    end
 
-      def supported? : Bool
-        digest_type.in?({2_u8, 4_u8}) && Crypto.supported?(algorithm)
-      end
-
-      def matches?(zone : Wire::Name, key : Key) : Bool
-        return false unless supported? && key.usable? && algorithm == key.algorithm && key_tag == key.tag
-        input = IO::Memory.new
-        zone.wire(input)
-        input.write(key.data)
-        expected = digest_type == 2 ? Digest::SHA256.digest(input.to_slice) : OpenSSL::Digest.new("SHA384").update(input.to_slice).final
-        digest == expected
-      end
+    def matches?(ds : DS, zone : Wire::Name, key : Key) : Bool
+      return false unless supported?(ds) && ds.algorithm == key.algorithm && ds.key_tag == key.key_tag
+      input = IO::Memory.new
+      zone.wire(input)
+      input.write(key.wire_data)
+      expected = ds.digest_type == 2 ? Digest::SHA256.digest(input.to_slice) : OpenSSL::Digest.new("SHA384").update(input.to_slice).final
+      ds.digest == expected
     end
 
     struct Signature
-      getter type : UInt16
-      getter algorithm : UInt8
-      getter labels : UInt8
-      getter original_ttl : UInt32
-      getter expires : UInt32
-      getter inception : UInt32
-      getter key_tag : UInt16
       getter signer : Wire::Name
-      getter prefix : Bytes
-      getter bytes : Bytes
-      getter ttl : UInt32
+
+      delegate algorithm, labels, key_tag, type_covered, to: @rrsig
 
       def initialize(record : Wire::RR)
-        io = IO::Memory.new(record.data)
-        @type = io.read_bytes(UInt16, Wire::FORMAT)
-        @algorithm = io.read_bytes(UInt8, Wire::FORMAT)
-        @labels = io.read_bytes(UInt8, Wire::FORMAT)
-        @original_ttl = io.read_bytes(UInt32, Wire::FORMAT)
-        @expires = io.read_bytes(UInt32, Wire::FORMAT)
-        @inception = io.read_bytes(UInt32, Wire::FORMAT)
-        @key_tag = io.read_bytes(UInt16, Wire::FORMAT)
-        @signer = Wire::Name.read(io, record.data, compression: false)
-        @prefix = record.data[0, io.pos]
-        @bytes = record.data[io.pos..]
+        @rrsig = Resource::RRSIG.new(record.data, record.data)
+        @signer = Wire::Name.new(@rrsig.signer_labels)
+        @header = record.data[0, Resource::RRSIG::HEADER_SIZE]
         @ttl = record.ttl
-        raise IO::Error.new("empty RRSIG signature") if bytes.empty?
+      end
+
+      def bytes : Bytes
+        @rrsig.signature
       end
 
       def ttl_at(now : UInt32) : UInt32?
-        age = now &- inception
-        remaining = expires &- now
-        return unless age < 0x80000000_u32 && remaining < 0x80000000_u32 && (expires &- inception) < 0x80000000_u32
-        {ttl, original_ttl, remaining}.min
+        age = now &- @rrsig.inception
+        remaining = @rrsig.expiration &- now
+        return unless age < 0x80000000_u32 && remaining < 0x80000000_u32 && (@rrsig.expiration &- @rrsig.inception) < 0x80000000_u32
+        {@ttl, @rrsig.original_ttl, remaining}.min
       end
 
       def signed_data(records : Array(Wire::RR), owner : Wire::Name) : Bytes
         output = IO::Memory.new
-        output.write(prefix)
+        output.write(@header)
+        signer.wire(output)
         # RFC 4034 permits the validator to remove duplicate RRs.
         records.map(&.data).uniq!.sort!.each do |data|
           owner.wire(output)
-          output.write_bytes(type, Wire::FORMAT)
+          output.write_bytes(type_covered, Wire::FORMAT)
           output.write_bytes(Wire::IN, Wire::FORMAT)
-          output.write_bytes(original_ttl, Wire::FORMAT)
+          output.write_bytes(@rrsig.original_ttl, Wire::FORMAT)
           output.write_bytes(data.size.to_u16, Wire::FORMAT)
           output.write(data)
         end
@@ -151,7 +117,7 @@ module DNS::DNSSEC
     end
 
     private def public_key(key : Key) : Bytes?
-      raw = key.material
+      raw = key.public_key
       case key.algorithm
       when 8, 10
         rsa(raw)

@@ -53,6 +53,7 @@ module DNS
     CNAME      =     5 # Canonical Name record, aliases one domain name to another
     SOA        =     6 # Start of Authority record, contains administrative information about the zone
     PTR        =    12 # Pointer record, used for reverse DNS lookups (IP to domain name)
+    HINFO      =    13 # Host information, stores CPU and operating system strings
     MX         =    15 # Mail Exchanger record, specifies mail servers responsible for receiving email
     TXT        =    16 # Text record, holds arbitrary text; often used for domain verification and policies like SPF
     RP         =    17 # Responsible Person record, provides email address of the person responsible for the domain

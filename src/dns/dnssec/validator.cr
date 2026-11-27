@@ -43,7 +43,7 @@ module DNS::DNSSEC
       trust_anchors.each do |anchor|
         zone = Wire::Name.from_text(anchor.zone)
         entry = Crypto::DS.new(anchor.key_tag, anchor.algorithm, anchor.digest_type, anchor.digest.dup)
-        raise ArgumentError.new("unsupported DNSSEC trust anchor for #{zone}") unless entry.supported?
+        raise ArgumentError.new("unsupported DNSSEC trust anchor for #{zone}") unless Crypto.supported?(entry)
         (@anchors[zone] ||= [] of Crypto::DS) << entry
       end
     end
@@ -213,8 +213,13 @@ module DNS::DNSSEC
       message = fetch(zone, RecordType::DNSKEY.value)
       records = message.answer(zone, RecordType::DNSKEY.value)
       raise ValidationError.new(Status::Bogus, "missing DNSKEY RRset for #{zone}") if records.empty? || message.code != 0
-      keys = records.map { |record| Key.new(record.data) }.select(&.usable?)
-      trusted = keys.select { |key| ds.any?(&.matches?(zone, key)) }
+      keys = records.compact_map do |record|
+        key = Key.new(record.data, record.data)
+        key if Crypto.usable?(key)
+      rescue IO::Error
+        nil
+      end
+      trusted = keys.select { |key| ds.any? { |entry| Crypto.matches?(entry, zone, key) } }
       if trusted.empty? || !(ttl = authenticated_dnskeys(records, message, zone, trusted))
         raise ValidationError.new(Status::Bogus, "DNSKEY RRset for #{zone} does not validate against its DS")
       end
@@ -243,8 +248,8 @@ module DNS::DNSSEC
         raise ValidationError.new(Status::Bogus, "negative response contains DS records for #{zone}")
       end
       authentication = authenticate(records, message.answers, message, parent_only: true)
-      ds = records.map { |record| Crypto::DS.parse(record.data) }
-      return {ds, key_expiry(authentication.ttl).limit(authentication.key_expiry)} if ds.any?(&.supported?)
+      ds = records.map { |record| Crypto::DS.new(record.data, record.data) }
+      return {ds, key_expiry(authentication.ttl).limit(authentication.key_expiry)} if ds.any? { |entry| Crypto.supported?(entry) }
       # RFC 6840 section 5.2: treat this like an authenticated unsigned delegation.
       raise ValidationError.new(Status::Insecure, "no supported DS digest and signature algorithm for #{zone}")
     end
@@ -268,8 +273,8 @@ module DNS::DNSSEC
       first = records.first
       section.compact_map do |record|
         next unless record.type == RecordType::RRSIG.value && record.name == first.name
-        next unless record.data.size >= 2 && Wire::FORMAT.decode(UInt16, record.data[0, 2]) == first.type
-        Signature.new(record)
+        signature = Signature.new(record)
+        signature if signature.type_covered == first.type
       rescue IO::Error
         nil
       end
@@ -339,7 +344,7 @@ module DNS::DNSSEC
     private def verify(records : Array(RR), signature : Signature, keys : Array(Key), owner : Name) : UInt32?
       ttl = signature.ttl_at(@now)
       return unless ttl && Crypto.supported?(signature.algorithm)
-      matching = keys.select { |key| key.algorithm == signature.algorithm && key.tag == signature.key_tag }
+      matching = keys.select { |key| key.algorithm == signature.algorithm && key.key_tag == signature.key_tag }
       return if matching.empty?
 
       data = signature.signed_data(records, owner)

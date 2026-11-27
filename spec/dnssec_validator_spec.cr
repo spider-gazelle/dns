@@ -178,6 +178,27 @@ describe DNS::Resolver::Validating do
 end
 
 describe DNS::DNSSEC::Validator do
+  it "verifies typed NAPTR and DNSKEY answers with mixed-case RRSIG signer names" do
+    fixture = DNSSECFixture.new
+    upstream = udp_resolver(fixture.stub)
+    packet = DNS.query_packet("phone.sip.test.", DNS::RecordType::NAPTR, resolver: upstream)
+    packet.answers.first.resource.as(DNS::Resource::NAPTR).replacement.should eq "_SIP._UDP.SIP.TEST"
+    packet.answers.last.resource.as(DNS::Resource::RRSIG).signer_name.should eq "SIP.TEST"
+
+    validator = fixture.validator(anchor_name: "anchor_sip")
+    now = DNSSECFixture::NOW
+    result = validator.query("phone.sip.test.", DNS::RecordType::NAPTR, now: now)
+    result.secure?.should be_true
+    naptr = result.answers.first.resource.as(DNS::Resource::NAPTR)
+    {naptr.flags, naptr.service, naptr.replacement}.should eq({"S", "SIP+D2U", "_sip._udp.sip.test"})
+
+    dnskey = validator.query("sip.test.", DNS::RecordType::DNSKEY, now: now)
+    dnskey.secure?.should be_true
+    dnskey.answers.first.resource.as(DNS::Resource::DNSKEY).key_tag.should eq DNSSECFixture.anchor("anchor_sip").key_tag
+  ensure
+    fixture.try(&.close)
+  end
+
   it "reuses authenticated keys across names and still verifies each answer" do
     fixture = DNSSECFixture.new
     validator = fixture.validator

@@ -77,6 +77,37 @@ module DNS::Resource
     read_labels(io, message)
   end
 
+  # :nodoc:
+  def self.read_type_bitmap(io : IO::Memory) : Set(UInt16)
+    types = Set(UInt16).new
+    previous = -1
+    until io.pos == io.size
+      window = io.read_bytes(UInt8).to_i
+      size = io.read_bytes(UInt8).to_i
+      raise IO::Error.new("invalid DNSSEC type bitmap") unless window > previous && size.in?(1..32)
+      previous = window
+      bitmap = Bytes.new(size)
+      io.read_fully(bitmap)
+      raise IO::Error.new("invalid trailing zero in DNSSEC type bitmap") if bitmap[-1].zero?
+      bitmap.each_with_index do |byte, index|
+        8.times do |bit|
+          types.add((window * 256 + index * 8 + bit).to_u16) if byte.bits_set?(0x80_u8 >> bit)
+        end
+      end
+    end
+    types
+  end
+
+  # :nodoc:
+  def self.read_nsec3_parameters(io : IO::Memory) : {UInt8, UInt8, UInt16, Bytes}
+    hash_algorithm = io.read_bytes(UInt8)
+    flags = io.read_bytes(UInt8)
+    iterations = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
+    salt = Bytes.new(io.read_bytes(UInt8))
+    io.read_fully(salt)
+    {hash_algorithm, flags, iterations, salt}
+  end
+
   # Writes a name in DNS wire format, including the terminating root label.
   def self.write_labels(io : IO, name : String) : Nil
     name = name.rchop('.')

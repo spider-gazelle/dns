@@ -141,13 +141,16 @@ module DNS::DNSSEC
       when 6, 14, 17               then canonical_names(data, message, 0, 2)
       when 15, 18, 21, 36          then canonical_names(data, message, 2, 1)
       when 26                      then canonical_names(data, message, 2, 2)
-      when 24, 46                  then canonical_names(data, message, 18, 1, compression: false)
+      when 24                      then canonical_names(data, message, 18, 1, compression: false)
       when 33                      then canonical_names(data, message, 6, 1, compression: false)
       when 30                      then canonical_names(data, message, 0, 1)
       when 39                      then canonical_names(data, message, 0, 1, compression: false)
       when 35                      then naptr(data, message)
       when 38                      then a6(data, message)
-      else                              data # Includes NSEC and SVCB/HTTPS, whose RDATA is retained as sent.
+      else
+        # RRSIG signer names are canonicalized when constructing signed data.
+        # NSEC and SVCB/HTTPS RDATA is retained as sent.
+        data
       end
     end
 
@@ -163,10 +166,11 @@ module DNS::DNSSEC
     end
 
     private def self.naptr(data : Bytes, message : Bytes) : Bytes
-      input = IO::Memory.new(data)
-      input.skip(4)
-      3.times { input.skip(input.read_byte || raise IO::EOFError.new) }
-      canonical_names(data, message, input.pos.to_i, 1, compression: false)
+      record = Resource::NAPTR.new(data, message)
+      output = IO::Memory.new
+      output.write(data[0, record.replacement_offset])
+      Name.new(record.replacement_labels).wire(output)
+      output.to_slice
     end
 
     private def self.a6(data : Bytes, message : Bytes) : Bytes

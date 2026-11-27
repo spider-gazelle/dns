@@ -11,6 +11,13 @@ struct DNS::Packet::ResourceRecord
 
   BLANK = Bytes.new(0)
 
+  private RAW_ON_DECODE_ERROR = {
+    RecordType::CAA.value, RecordType::TLSA.value, RecordType::SSHFP.value, RecordType::DS.value,
+    RecordType::DNSKEY.value, RecordType::RRSIG.value, RecordType::NSEC.value, RecordType::NSEC3.value,
+    RecordType::NAPTR.value, RecordType::URI.value, RecordType::SVCB.value, RecordType::HTTPS.value,
+    RecordType::CDS.value, RecordType::CDNSKEY.value, RecordType::NSEC3PARAM.value, RecordType::HINFO.value,
+  }
+
   def initialize(@name : String, @type : UInt16, @class_code : UInt16, @ttl : Time::Span, @resource : Resource? = nil, @resource_data : Bytes = BLANK)
   end
 
@@ -30,7 +37,7 @@ struct DNS::Packet::ResourceRecord
     resource = begin
       DNS::Resource::LOOKUP[type]?.try(&.new(resource_data, io.to_slice))
     rescue ex : IO::Error
-      raise ex unless type.in?({RecordType::SVCB.value, RecordType::HTTPS.value})
+      raise ex unless type.in?(RAW_ON_DECODE_ERROR)
       nil
     end
     new(name, type, class_code, ttl, resource, resource_data)

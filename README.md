@@ -161,10 +161,33 @@ an authenticated connection such as certificate-verified TLS or HTTPS.
 [RFC 4035](https://www.rfc-editor.org/rfc/rfc4035.html#section-4.9) · [RFC 6840](https://www.rfc-editor.org/rfc/rfc6840.html#section-5.7)
 
 `dnssec_ok: true` sets the EDNS DO bit to request DNSSEC records. These lookups
-keep EDNS on UDP retries and TCP fallback. RRSIG, DNSKEY, DS, and authenticated
-denial records are available through their resource record type and raw
-`resource_data`. `checking_disabled: true` sets CD for diagnostics when the
-application needs the data the upstream would otherwise withhold.
+keep EDNS on UDP retries and TCP fallback. `checking_disabled: true` sets CD
+for diagnostics when the application needs the data the upstream would
+otherwise withhold.
+
+### Typed record data
+
+`DNS.query` and `DNS.query_packet` expose parsed data through each record's
+`resource` getter. `DNS::Resource` includes decoders for CAA, TLSA, SSHFP,
+NAPTR, URI, HINFO, DS, DNSKEY, RRSIG, NSEC, NSEC3, NSEC3PARAM, CDS, and
+CDNSKEY. For example, to inspect CAA properties for a domain, read each
+record's flags, tag, and value.
+
+```crystal
+DNS.query("example.com.", [DNS::RecordType::CAA]).each do |record|
+  if caa = record.resource.as?(DNS::Resource::CAA)
+    puts "#{caa.flags} #{caa.tag} #{caa.value}"
+  end
+end
+```
+
+Use `resource_data` to inspect raw bytes, including when a record has no typed
+decoder or one of the decoders above cannot parse its data. `DNS.query_packet`
+preserves the original wire data.
+
+`CDS#delete_signal?` and `CDNSKEY#delete_signal?` recognize the deletion
+record payload. A parent applying the signal must authenticate the complete
+RRset and apply its acceptance policy. [RFC 8078 with verified errata](https://www.rfc-editor.org/rfc/inline-errata/rfc8078.html)
 
 ### Local DNSSEC validation
 
