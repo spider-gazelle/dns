@@ -54,6 +54,22 @@ abstract class DNS::Resolver
   # perform the DNS query, fetching using request_id => record_type
   abstract def query(domain : String, dns_server : String, fetch : Hash(UInt16, UInt16), timeout : Time::Span, & : DNS::Packet ->)
 
+  # Resolvers that expose wire-level DNSSEC flags override this overload.
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span,
+    *,
+    dnssec : DNSSEC::Options,
+    & : DNS::Packet ->
+  )
+    if dnssec.requested?
+      raise DNSSEC::UnsupportedResolver.new("#{self.class} does not expose DNSSEC query flags")
+    end
+    query(domain, dns_server, fetch, timeout) { |response| yield response }
+  end
+
   # returns the list of DNS servers and their current ordering
   def servers
     @servers_lock.synchronize { @servers.dup }

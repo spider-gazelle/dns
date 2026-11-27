@@ -247,6 +247,36 @@ module DNS
     answers
   end
 
+  # Query a fully qualified name and return the upstream packet, including
+  # DNSSEC flags and authority records. Packet queries bypass the library's
+  # hosts file, response cache, and search suffixes.
+  # NXDOMAIN and other non-retryable DNS responses are returned as packets.
+  def self.query_packet(
+    domain : String,
+    record : RecordType | UInt16,
+    *,
+    resolver : Resolver = select_resolver(domain),
+    dnssec : DNSSEC::Options = DNSSEC::Options.new,
+  ) : Packet
+    name = normalize_name(domain)
+    fetch = {Random::Secure.rand(UInt16) => record.to_u16}
+    packet : Packet? = nil
+    resolver.select_server do |server, timeout|
+      packet = nil
+      resolver.query(name, server, fetch.dup, timeout, dnssec: dnssec) do |response|
+        response.raise_on_error! if response.server_error?
+        if dnssec.dnssec_ok? && (response.edns.nil? || response.edns_rejected?)
+          error = Packet::ServerError.new("DNS server #{server} did not provide EDNS required for DNSSEC")
+          error.extended_errors = response.extended_errors
+          raise error
+        end
+        packet = response
+      end
+      raise IO::Error.new("DNS server #{server} did not return a packet for #{name}") unless packet
+    end
+    packet || raise IO::Error.new("DNS lookup returned no packet for #{name}")
+  end
+
   def self.reverse_lookup(ip : Socket::IPAddress) : Array(String)
     ptr = case ip.family
           in .inet?

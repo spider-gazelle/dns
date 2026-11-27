@@ -1,8 +1,9 @@
 # The OPT pseudo-record and its extensible option list.
 struct DNS::Packet::EDNS
-  DEFAULT_UDP_SIZE = 1232_u16
-  COOKIE           =   10_u16
-  EXTENDED_ERROR   =   15_u16
+  DEFAULT_UDP_SIZE =   1232_u16
+  DNSSEC_OK        = 0x8000_u16
+  COOKIE           =     10_u16
+  EXTENDED_ERROR   =     15_u16
 
   record Option, code : UInt16, data : Bytes
   record ExtendedError, code : UInt16, text : String?
@@ -61,6 +62,14 @@ struct DNS::Packet::EDNS
 
   def option(code : UInt16) : Option?
     options.find { |option| option.code == code }
+  end
+
+  def dnssec_ok? : Bool
+    flags.bits_set?(DNSSEC_OK)
+  end
+
+  def with_dnssec_ok : self
+    self.class.new(udp_payload_size, options, extended_rcode: extended_rcode, version: version, flags: flags | DNSSEC_OK)
   end
 
   def extended_errors : Array(ExtendedError)

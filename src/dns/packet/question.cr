@@ -43,15 +43,19 @@ class DNS::Packet::Question
     edns_udp_size : UInt16 = 0_u16,
     *,
     edns : EDNS? = nil,
+    dnssec : DNSSEC::Options = DNSSEC::Options.new,
   ) : Bytes
     additionals = [] of DNS::Packet::ResourceRecord
     edns ||= EDNS.new(edns_udp_size) if edns_udp_size > 0
+    edns = (edns || EDNS.new).with_dnssec_ok if dnssec.dnssec_ok?
     additionals << edns.to_resource_record if edns
 
     DNS::Packet.new(
       id: id,
       questions: [DNS::Packet::Question.new(domain, type, class_code)],
       additionals: additionals,
+      authenticated_data: dnssec.request_ad?,
+      checking_disabled: dnssec.checking_disabled?,
     ).to_slice
   end
 end

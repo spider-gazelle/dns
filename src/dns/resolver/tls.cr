@@ -21,6 +21,18 @@ class DNS::Resolver::TLS < DNS::Resolver
     timeout : Time::Span = ::DNS.timeout,
     & : DNS::Packet ->
   )
+    query(domain, dns_server, fetch, timeout, dnssec: DNSSEC::Options.new) { |response| yield response }
+  end
+
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span = ::DNS.timeout,
+    *,
+    dnssec : DNSSEC::Options,
+    & : DNS::Packet ->
+  )
     return if fetch.empty?
 
     dns_server_name = server_names[dns_server]
@@ -38,7 +50,7 @@ class DNS::Resolver::TLS < DNS::Resolver
 
       # pipeline the requests
       fetch.each do |id, record|
-        query_bytes = DNS::Packet::Question.build_query(domain, record, id, edns: query_edns)
+        query_bytes = DNS::Packet::Question.build_query(domain, record, id, edns: query_edns, dnssec: dnssec)
         write_tcp_query(tls_socket, query_bytes, deadline)
       end
 

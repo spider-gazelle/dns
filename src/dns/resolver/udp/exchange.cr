@@ -7,13 +7,14 @@ class DNS::Resolver::UDP
     getter outstanding : Hash(UInt16, UInt16)
     getter? legacy : Bool
     getter cookie_peer : CookieJar::Peer?
+    getter dnssec : DNSSEC::Options
 
     @wire_ids = [] of UInt16
     @cookie_retries = Set(UInt16).new
     @shared : SharedSocket = SharedSocket.instance
     @legacy_probes : Hash(UInt16, UInt16)
 
-    def initialize(@server, @domain, fetch : Hash(UInt16, UInt16), timeout : Time::Span, @legacy : Bool, @cookie_peer)
+    def initialize(@server, @domain, fetch : Hash(UInt16, UInt16), timeout : Time::Span, @dnssec, @legacy : Bool, @cookie_peer)
       @outstanding = fetch.dup
       @legacy_probes = legacy? ? fetch.dup : {} of UInt16 => UInt16
       @channel = Channel(SharedSocket::Reply).new(fetch.size * 3)
@@ -22,7 +23,7 @@ class DNS::Resolver::UDP
     end
 
     def send(id : UInt16, type : UInt16, edns : EDNS?) : Nil
-      @wire_ids << @shared.register_and_send(server, domain, id, type, @channel, edns: edns)
+      @wire_ids << @shared.register_and_send(server, domain, id, type, @channel, edns: edns, dnssec: dnssec)
     end
 
     def receive : SharedSocket::Reply?

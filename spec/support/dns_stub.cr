@@ -90,6 +90,7 @@ def dns_response(
   additionals = [] of DNS::Packet::ResourceRecord,
   authorities = [] of DNS::Packet::ResourceRecord,
   response_code = 0_u8,
+  authenticated_data = false,
 ) : Bytes
   DNS::Packet.new(
     id: id || query.id,
@@ -100,6 +101,7 @@ def dns_response(
     additionals: additionals,
     authorities: authorities,
     response_code: response_code,
+    authenticated_data: authenticated_data,
   ).to_slice
 end
 
