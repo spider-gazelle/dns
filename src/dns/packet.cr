@@ -28,6 +28,7 @@ struct DNS::Packet
   getter answers : Array(DNS::Packet::ResourceRecord)
   getter authorities : Array(DNS::Packet::ResourceRecord)
   getter additionals : Array(DNS::Packet::ResourceRecord)
+  getter edns : EDNS?
 
   def initialize(
     @id : UInt16,
@@ -45,6 +46,7 @@ struct DNS::Packet
     @recursion_available = (flags >> 7) & 0b1 == 1   # RA (1 bit) - Recursion Available
     @reserved_z = ((flags >> 4) & 0b111).to_u8       # Z (3 bits) - Reserved (should be 0)
     @response_code = (flags & 0b1111).to_u8          # RCODE (4 bits) - Response Code
+    @edns = EDNS.from_additionals(@additionals)
   end
 
   def initialize(
@@ -62,9 +64,24 @@ struct DNS::Packet
     @additionals : Array(DNS::Packet::ResourceRecord) = [] of DNS::Packet::ResourceRecord,
   )
     @operation_code = operation_code.is_a?(Enum) ? operation_code.value : operation_code.to_u8
+    @edns = EDNS.from_additionals(@additionals)
   end
 
+  # Reads a single DNS message from the remaining bytes of the IO.
   def self.from_io(io : IO, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
+    from_slice(io.getb_to_end, format)
+  end
+
+  def self.from_io(io : IO::Memory, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
+    return read_message(io) if io.pos.zero?
+
+    message = IO::Memory.new(io.to_slice[io.pos..])
+    packet = read_message(message)
+    io.pos += message.pos
+    packet
+  end
+
+  private def self.read_message(io : IO::Memory) : self
     # Extracting the DNS header
     id = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
     flags = io.read_bytes(UInt16, IO::ByteFormat::BigEndian)
@@ -80,29 +97,31 @@ struct DNS::Packet
       questions << io.read_bytes(DNS::Packet::Question)
     end
 
-    # Reading the answer section
-    answers = Array(DNS::Packet::ResourceRecord).new
-    answer_count.times do
-      answers << io.read_bytes(DNS::Packet::ResourceRecord)
-    end
-
-    # Reading the authority section
-    authorities = Array(DNS::Packet::ResourceRecord).new
-    authorities_count.times do
-      authorities << io.read_bytes(DNS::Packet::ResourceRecord)
-    end
-
-    # Reading the additional section
-    additionals = Array(DNS::Packet::ResourceRecord).new
-    additionals_count.times do
-      additionals << io.read_bytes(DNS::Packet::ResourceRecord)
-    end
+    answers = read_records(io, answer_count)
+    authorities = read_records(io, authorities_count)
+    additionals = read_records(io, additionals_count)
 
     DNS::Packet.new(id, flags, questions, answers, authorities, additionals)
   end
 
+  private def self.read_records(io : IO::Memory, count : UInt16) : Array(ResourceRecord)
+    records = Array(ResourceRecord).new
+    malformed : Set({String, UInt16, UInt16})? = nil
+    count.times do
+      record = io.read_bytes(ResourceRecord)
+      records << record
+      if record.resource.nil? && record.type.in?({RecordType::SVCB.value, RecordType::HTTPS.value})
+        (malformed ||= Set({String, UInt16, UInt16}).new) << {record.name.downcase, record.type, record.class_code}
+      end
+    end
+    if rejected = malformed
+      records.reject! { |record| rejected.includes?({record.name.downcase, record.type, record.class_code}) }
+    end
+    records
+  end
+
   def self.from_slice(bytes : Bytes, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
-    from_io(IO::Memory.new(bytes), IO::ByteFormat::BigEndian)
+    read_message(IO::Memory.new(bytes))
   end
 
   def to_slice : Bytes
@@ -146,28 +165,64 @@ struct DNS::Packet
 
   # Check if the response was successful (rcode == 0).
   def success? : Bool
-    response_code.zero?
+    effective_response_code.zero?
   end
 
   # Check if there was a server error (rcode == 2).
   def server_error? : Bool
-    response_code == 2
+    effective_response_code == 2
+  end
+
+  # Combines the header's four bits with the eight extended RCODE bits in OPT.
+  def effective_response_code : UInt16
+    if opt = edns
+      (opt.extended_rcode.to_u16 << 4) | response_code
+    else
+      response_code.to_u16
+    end
+  end
+
+  # A legacy server can signal that it cannot process EDNS without an OPT reply.
+  def edns_rejected? : Bool
+    code = effective_response_code
+    code == 16 || (code.in?({1, 4}) && edns.nil?)
+  end
+
+  def extended_errors : Array(EDNS::ExtendedError)
+    edns.try(&.extended_errors) || [] of EDNS::ExtendedError
+  end
+
+  # Validates a reply to a single Internet-class QUERY.
+  def matches_question?(domain : String, type : UInt16, id : UInt16, *, allow_missing_question : Bool = false) : Bool
+    return false unless response? && @id == id && operation_code == OpCode::QUERY.value
+    return allow_missing_question if questions.empty?
+    return false unless questions.size == 1
+
+    question = questions.first
+    question.type == type && question.class_code == ClassCode::Internet.value &&
+      question.name.compare(domain.rchop('.'), case_insensitive: true) == 0
   end
 
   def raise_on_error!
+    code = effective_response_code
+    return if code.zero?
+
     if question = questions.first?
       message = "Hostname lookup for #{question.name} failed"
     else
       message = "Hostname lookup failed"
     end
 
-    case response_code
-    when 1; raise DNS::Packet::FormatError.new(message)
-    when 2; raise DNS::Packet::ServerError.new(message)
-    when 3; raise DNS::Packet::NameError.new(message)
-    when 4; raise DNS::Packet::NotImplementedError.new(message)
-    when 5; raise DNS::Packet::RefusedError.new(message)
-    end
+    error = case code
+            when 1 then DNS::Packet::FormatError.new(message)
+            when 2 then DNS::Packet::ServerError.new(message)
+            when 3 then DNS::Packet::NameError.new(message)
+            when 4 then DNS::Packet::NotImplementedError.new(message)
+            when 5 then DNS::Packet::RefusedError.new(message)
+            else        DNS::Packet::ResponseError.new(message, code)
+            end
+    error.extended_errors = extended_errors
+    raise error
   end
 end
 

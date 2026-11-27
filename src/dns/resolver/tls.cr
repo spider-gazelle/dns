@@ -3,14 +3,14 @@ require "openssl"
 
 class DNS::Resolver::TLS < DNS::Resolver
   # provide your own server list
-  def initialize(@server_names : Hash(String, String), @port : UInt16 = 853_u16)
+  def initialize(@server_names : Hash(String, String), @port : UInt16 = 853_u16, @tls_context : OpenSSL::SSL::Context::Client? = nil)
     @servers = @server_names.keys
   end
 
   # mapping of IP addresses to TLS names
   getter server_names : Hash(String, String)
 
-  # port to make the DNS query on, defaults to 53
+  # port to make the DNS query on, defaults to 853
   property port : UInt16
 
   # perform the DNS query, fetching using request_id => record_type
@@ -21,45 +21,44 @@ class DNS::Resolver::TLS < DNS::Resolver
     timeout : Time::Span = ::DNS.timeout,
     & : DNS::Packet ->
   )
+    return if fetch.empty?
+
     dns_server_name = server_names[dns_server]
     ip = Socket::IPAddress.new(dns_server, port)
+    deadline = Time.instant + timeout
     socket = TCPSocket.new ip.family
-    socket.read_timeout = timeout
-    socket.tcp_nodelay = true
+    tls_socket : OpenSSL::SSL::Socket::Client? = nil
 
     begin
-      socket.connect(ip)
-      socket = OpenSSL::SSL::Socket::Client.new(socket, sync_close: true, hostname: dns_server_name)
+      socket.tcp_nodelay = true
+      socket.connect(ip, timeout: remaining_time(deadline))
+      socket.read_timeout = socket.write_timeout = remaining_time(deadline)
+      context = @tls_context || OpenSSL::SSL::Context::Client.new
+      tls_socket = OpenSSL::SSL::Socket::Client.new(socket, context, hostname: dns_server_name)
 
       # pipeline the requests
       fetch.each do |id, record|
-        io = IO::Memory.new
-        query_bytes = DNS::Packet::Question.build_query(domain, record, id)
-        io.write_bytes(query_bytes.size.to_u16, IO::ByteFormat::BigEndian)
-        io.write query_bytes
-
-        # ensure request sent in a single write system call
-        socket.write(io.to_slice)
-        socket.flush
+        query_bytes = DNS::Packet::Question.build_query(domain, record, id, edns: query_edns)
+        write_tcp_query(tls_socket, query_bytes, deadline)
       end
 
-      # process the responses
-      responses = 0
-      loop do
-        message_length = socket.read_bytes UInt16, IO::ByteFormat::BigEndian
-        message_bytes = Bytes.new(message_length)
-        socket.read_fully message_bytes
-        dns_response = DNS::Packet.from_slice message_bytes
-
-        # ignore anything we are not expecting
-        if fetch[dns_response.id]?
+      outstanding = fetch.dup
+      until outstanding.empty?
+        dns_response = read_tcp_response(tls_socket, deadline)
+        if (record = outstanding[dns_response.id]?) &&
+           dns_response.matches_question?(domain, record, dns_response.id, allow_missing_question: true)
+          outstanding.delete(dns_response.id)
           yield dns_response
-          responses += 1
-          break if responses == fetch.size
         end
       end
+    rescue ex : OpenSSL::Error
+      raise IO::Error.new("DNS-over-TLS query to #{dns_server} failed", cause: ex)
     ensure
-      socket.close
+      begin
+        tls_socket.try(&.close)
+      ensure
+        socket.close
+      end
     end
   end
 end

@@ -9,13 +9,9 @@ Spec.before_suite do
   ::Log.setup("*", :trace)
 end
 
-servers = DNS::Servers.host.servers
-servers = DNS::Servers.fallback if servers.empty?
-puts "Default Servers: #{servers}"
-
 Spec.before_each do
   DNS.cache = DNS::Cache::HashMap.new
 
-  # use fallback server for better CI consistency
-  DNS.default_resolver = DNS::Resolver::UDP.new(DNS::Servers.fallback)
+  # Network specs install their own local resolver.
+  DNS.default_resolver = DNS::Resolver::UDP.new([] of String)
 end

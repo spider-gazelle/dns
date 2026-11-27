@@ -4,7 +4,13 @@ require "random/secure"
 class DNS::Resolver::UDP < DNS::Resolver
   # EDNS0 advertised UDP payload size. 1232 = 1280 (IPv6 min MTU) - 48 (IPv6+UDP
   # headers), the DNS Flag Day 2020 recommendation that avoids IP fragmentation.
-  EDNS_UDP_SIZE = 1232_u16
+  alias EDNS = DNS::Packet::EDNS
+
+  EDNS_UDP_SIZE = EDNS::DEFAULT_UDP_SIZE
+
+  # DNS Cookies are negotiated separately with each UDP upstream.
+  property? dns_cookies : Bool = true
+  @cookie_jar = CookieJar.new
 
   # provide your own server list
   def initialize(@servers : Array(String), @port : UInt16 = 53_u16)
@@ -36,88 +42,115 @@ class DNS::Resolver::UDP < DNS::Resolver
     return if fetch.empty?
 
     server = Socket::IPAddress.new(dns_server, port.to_i)
-    shared = SharedSocket.instance
+    peer = cookie_peer(server) if managed_cookies?
+    cookie = @cookie_jar.option(peer) if peer
+    edns = udp_edns(cookie)
+    legacy = edns_options.empty? && (!cookie || cookie.data.size == CookieJar::CLIENT_SIZE)
+    exchange = Exchange.new(server, domain, fetch, timeout, legacy: legacy, cookie_peer: peer)
+    fetch.each { |id, type| exchange.send(id, type, edns) }
 
-    # one buffered slot per outstanding question so the reader never blocks
-    channel = Channel(DNS::Packet).new(fetch.size)
-    wire_ids = Array(UInt16).new(fetch.size)
-
-    begin
-      fetch.each do |logical_id, record|
-        wire_ids << shared.register_and_send(server, domain, logical_id, record, channel)
-      end
-
-      deadline = Time.instant + timeout
-      received = 0
-      while received < fetch.size
-        remaining = deadline - Time.instant
-        break if remaining <= Time::Span.zero
-
-        response =
-          select
-          when packet = channel.receive
-            packet
-          when timeout(remaining)
-            nil # overall deadline reached
-          end
-        break if response.nil?
-
-        received += 1
-
-        # a truncated UDP response (TC bit) must be refetched over TCP to obtain
-        # the complete answer (RFC 7766 / DNS Flag Day 2020). If the TCP fetch
-        # fails we must NOT yield the partial UDP answer - raise so the caller
-        # retries / fails over to another server.
-        if response.truncation?
-          record = fetch[response.id]?
-          tcp = record ? tcp_query(server, domain, response.id, record, timeout) : nil
-          raise IO::Error.new("truncated DNS response and TCP fallback failed for #{dns_server}") unless tcp
-          response = tcp
-        end
-
-        yield response
-      end
-
-      raise IO::TimeoutError.new("DNS query to #{dns_server} did not complete in time") if received < fetch.size
-    ensure
-      shared.cancel(wire_ids)
+    until exchange.outstanding.empty?
+      reply = exchange.receive || raise IO::TimeoutError.new("DNS query to #{dns_server} did not complete in time")
+      next unless response = process_reply(exchange, reply)
+      exchange.complete(response.id)
+      yield response
     end
+  ensure
+    exchange.try(&.close)
+  end
+
+  private def managed_cookies? : Bool
+    dns_cookies? && edns_options.none? { |option| option.code == EDNS::COOKIE }
+  end
+
+  private def cookie_peer(server : Socket::IPAddress) : CookieJar::Peer?
+    # Ask the kernel which local address it routes to this server. UDP connect
+    # sends no packet. DNS messages still use the long-lived shared socket.
+    route = UDPSocket.new(server.family)
+    route.connect(server)
+    source = route.local_address
+    address = source.address
+    if interface = source.link_local_interface
+      address = "#{address}%#{interface}"
+    end
+    CookieJar::Peer.new(server, address)
+  rescue IO::Error
+    nil
+  ensure
+    route.try(&.close)
+  end
+
+  private def udp_edns(cookie : EDNS::Option?) : EDNS
+    cookie ? EDNS.new(options: edns_options + [cookie]) : query_edns
+  end
+
+  private def process_reply(exchange : Exchange, reply : SharedSocket::Reply) : DNS::Packet?
+    packet = reply.packet
+    return unless type = exchange.outstanding[packet.id]?
+    return unless reply.edns || exchange.legacy?
+
+    if (cookie = learn_cookie(exchange, reply)) && packet.effective_response_code == CookieJar::BAD_COOKIE && exchange.cookie_peer
+      return retry_cookie(exchange, packet.id, type, cookie)
+    end
+
+    if packet.truncation? && !packet.edns_rejected?
+      packet = refetch(exchange, type, packet.id, reply.edns ? EDNS_UDP_SIZE : 0_u16)
+    end
+
+    return if exchange.retry_legacy?(reply, packet)
+
+    packet
+  end
+
+  private def learn_cookie(exchange : Exchange, reply : SharedSocket::Reply) : EDNS::Option?
+    sent = reply.edns.try(&.option(EDNS::COOKIE))
+    return unless sent
+
+    cookie = reply.packet.edns.try(&.option(EDNS::COOKIE))
+    exchange.require_edns if cookie
+    if peer = exchange.cookie_peer
+      @cookie_jar.remember(peer, sent, cookie)
+    end
+    cookie
+  end
+
+  private def retry_cookie(exchange : Exchange, id : UInt16, type : UInt16, cookie : EDNS::Option) : DNS::Packet?
+    return refetch(exchange, type, id, EDNS_UDP_SIZE) unless exchange.retry_cookie?(id)
+    exchange.send(id, type, udp_edns(cookie))
+    nil
+  end
+
+  private def refetch(exchange : Exchange, type : UInt16, id : UInt16, udp_size : UInt16) : DNS::Packet
+    server = exchange.server
+    tcp_query(server, exchange.domain, id, type, remaining_time(exchange.deadline), edns_udp_size: udp_size) ||
+      raise IO::Error.new("DNS TCP fallback failed for #{server.address}")
   end
 
   # refetch a single question over TCP (used when a UDP response is truncated).
   # returns nil on any transport/parse/validation failure so the caller can
   # fail over rather than crash.
-  protected def tcp_query(server : Socket::IPAddress, domain : String, id : UInt16, record : UInt16, timeout : Time::Span) : DNS::Packet?
+  protected def tcp_query(
+    server : Socket::IPAddress,
+    domain : String,
+    id : UInt16,
+    record : UInt16,
+    timeout : Time::Span,
+    *,
+    edns_udp_size : UInt16 = EDNS_UDP_SIZE,
+  ) : DNS::Packet?
+    deadline = Time.instant + timeout
     socket = TCPSocket.new(server.family)
-    socket.read_timeout = timeout
-    socket.write_timeout = timeout
-    socket.tcp_nodelay = true
 
     begin
-      socket.connect(server)
+      socket.tcp_nodelay = true
+      socket.connect(server, timeout: remaining_time(deadline))
+      edns = EDNS.new(edns_udp_size, edns_options) unless edns_udp_size.zero?
+      query = DNS::Packet::Question.build_query(domain, record, id, edns: edns)
+      write_tcp_query(socket, query, deadline)
 
-      # TCP DNS messages are length-prefixed with a 16-bit big-endian length
-      query_bytes = DNS::Packet::Question.build_query(domain, record, id, edns_udp_size: EDNS_UDP_SIZE)
-      io = IO::Memory.new
-      io.write_bytes(query_bytes.size.to_u16, IO::ByteFormat::BigEndian)
-      io.write query_bytes
-      socket.write(io.to_slice)
-      socket.flush
-
-      message_length = socket.read_bytes(UInt16, IO::ByteFormat::BigEndian)
-      return if message_length.zero?
-      message_bytes = Bytes.new(message_length)
-      socket.read_fully(message_bytes)
-      packet = DNS::Packet.from_slice(message_bytes)
-
-      # validate the response matches the request we sent (the connected socket
-      # guarantees the peer, but we still verify id + question for correctness)
-      return unless packet.response? && packet.id == id
-      question = packet.questions.first?
-      return unless question && question.type == record
-      return unless question.class_code == DNS::ClassCode::Internet.value
-      return unless question.name.downcase == domain
-      packet
+      packet = read_tcp_response(socket, deadline)
+      allow_missing_question = !edns_udp_size.zero? && packet.edns_rejected?
+      packet if !packet.truncation? && packet.matches_question?(domain, record, id, allow_missing_question: allow_missing_question)
     rescue ex : IO::Error
       Log.trace(exception: ex) { "TCP fallback to #{server} failed" }
       nil
@@ -137,6 +170,8 @@ class DNS::Resolver::UDP < DNS::Resolver
   class SharedSocket
     class_getter instance : SharedSocket { SharedSocket.new }
 
+    record Reply, packet : DNS::Packet, edns : EDNS?
+
     # max bytes read from a single datagram; a larger answer arrives truncated
     # (TC) and is refetched over TCP
     RECV_BUFFER_SIZE = 4096
@@ -145,13 +180,28 @@ class DNS::Resolver::UDP < DNS::Resolver
     # allocation never degrades into a long collision-retry loop under the mutex
     MAX_INFLIGHT = 32_768
 
-    # an in-flight request awaiting its response
-    private record Pending,
-      channel : Channel(DNS::Packet),
-      server : Socket::IPAddress,
-      name : String,
-      type : UInt16,
-      logical_id : UInt16
+    private class Pending
+      getter channel : Channel(Reply)
+      getter server : Socket::IPAddress
+      getter name : String
+      getter type : UInt16
+      getter logical_id : UInt16
+      getter edns : EDNS?
+      property? delivered : Bool = false
+
+      def initialize(@channel, @server, @name, @type, @logical_id, @edns)
+      end
+
+      def matches?(packet : DNS::Packet, wire_id : UInt16) : Bool
+        sent = edns.try(&.option(EDNS::COOKIE))
+        return false unless CookieJar.accepts?(sent, packet)
+
+        compatibility_reply = edns && packet.edns_rejected?
+        cookie_challenge = sent && packet.effective_response_code == CookieJar::BAD_COOKIE
+        allow_missing_question = !!(compatibility_reply || cookie_challenge)
+        packet.matches_question?(name, type, wire_id, allow_missing_question: allow_missing_question)
+      end
+    end
 
     def initialize
       @mutex = Mutex.new
@@ -162,7 +212,15 @@ class DNS::Resolver::UDP < DNS::Resolver
 
     # send a single question over the shared socket and register it for response
     # delivery; returns the wire transaction id used.
-    def register_and_send(server : Socket::IPAddress, domain : String, logical_id : UInt16, record : UInt16, channel : Channel(DNS::Packet)) : UInt16
+    def register_and_send(
+      server : Socket::IPAddress,
+      domain : String,
+      logical_id : UInt16,
+      record : UInt16,
+      channel : Channel(Reply),
+      *,
+      edns : EDNS?,
+    ) : UInt16
       socket = socket_for(server.family)
 
       # allocate a globally-unique, unpredictable wire id and register atomically.
@@ -173,12 +231,12 @@ class DNS::Resolver::UDP < DNS::Resolver
         while @pending.has_key?(id)
           id = Random::Secure.rand(UInt16)
         end
-        @pending[id] = Pending.new(channel, server, domain, record, logical_id)
+        @pending[id] = Pending.new(channel, server, domain, record, logical_id, edns)
         id
       end
 
       begin
-        query_bytes = DNS::Packet::Question.build_query(domain, record, wire_id, edns_udp_size: EDNS_UDP_SIZE)
+        query_bytes = DNS::Packet::Question.build_query(domain, record, wire_id, edns: edns)
         socket.send(query_bytes, server)
       rescue ex
         cancel({wire_id})
@@ -209,7 +267,12 @@ class DNS::Resolver::UDP < DNS::Resolver
     private def open_socket(family : Socket::Family, bind_host : String) : UDPSocket
       socket = UDPSocket.new(family)
       # bind once to an OS-assigned ephemeral port shared by every query
-      socket.bind(bind_host, 0)
+      begin
+        socket.bind(bind_host, 0)
+      rescue ex
+        socket.close
+        raise ex
+      end
       spawn { read_loop(socket) }
       socket
     end
@@ -220,13 +283,16 @@ class DNS::Resolver::UDP < DNS::Resolver
       loop do
         length, source = socket.receive(buffer)
         next if length.zero?
-        # copy out of the reused buffer before handing across the channel
-        handle_datagram(buffer[0, length].dup, source)
-      rescue IO::Error
-        break # socket closed / unrecoverable: stop reading
-      rescue ex
-        Log.warn(exception: ex) { "error processing DNS response on shared socket" }
+        handle_datagram(buffer[0, length], source)
       end
+    rescue ex : IO::Error
+      Log.trace(exception: ex) { "DNS shared socket stopped receiving" }
+    ensure
+      @mutex.synchronize do
+        @v4 = nil if @v4.same?(socket)
+        @v6 = nil if @v6.same?(socket)
+      end
+      socket.close
     end
 
     private def handle_datagram(bytes : Bytes, source : Socket::IPAddress) : Nil
@@ -235,28 +301,28 @@ class DNS::Resolver::UDP < DNS::Resolver
       return if bytes.size < 12 # smaller than a DNS header
       wire_id = (bytes[0].to_u16 << 8) | bytes[1].to_u16
 
-      pending = @mutex.synchronize { @pending[wire_id]? }
-      return unless pending
+      pending = @mutex.synchronize do
+        request = @pending[wire_id]?
+        request if request && !request.delivered?
+      end
+      return unless pending && source == pending.server
 
-      packet = DNS::Packet.from_slice(bytes)
+      packet = begin
+        DNS::Packet.from_slice(bytes.dup)
+      rescue ex
+        Log.trace(exception: ex) { "discarding invalid UDP DNS response" }
+        return
+      end
+      return unless pending.matches?(packet, wire_id)
 
-      # RFC 5452 response validation - drop anything that doesn't match exactly
-      return unless packet.response?
-      return unless source == pending.server
-      question = packet.questions.first?
-      return unless question
-      return unless question.type == pending.type
-      return unless question.class_code == DNS::ClassCode::Internet.value
-      return unless question.name.downcase == pending.name
-
-      # accept: deregister (so duplicates/late replies are ignored) then deliver
-      # with the wire id remapped back to the caller's logical request id.
-      # the send is non-blocking: the reader fiber must never stall (the channel
-      # is sized to the query's question count, so this practically always sends)
-      @mutex.synchronize { @pending.delete(wire_id) }
+      # Reserve the ID until its owner cleans up, and ignore duplicates.
+      @mutex.synchronize do
+        return if pending.delivered? || !@pending[wire_id]?.same?(pending)
+        pending.delivered = true
+      end
       packet.id = pending.logical_id
       select
-      when pending.channel.send(packet)
+      when pending.channel.send(Reply.new(packet, pending.edns))
         # delivered
       else
         # waiter already gone / buffer full: drop rather than block the reader
@@ -266,3 +332,5 @@ class DNS::Resolver::UDP < DNS::Resolver
     end
   end
 end
+
+require "./udp/*"

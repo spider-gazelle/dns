@@ -23,7 +23,7 @@ class DNS::Servers
   property ndots : Int32
 
   # Base (initial) per-try timeout, from resolv.conf `timeout:` (or `DNS.timeout`)
-  property timeout : Time::Span
+  setter timeout : Time::Span?
   # Number of whole-list query passes, from resolv.conf `attempts:`
   property attempts : Int32
 
@@ -37,9 +37,13 @@ class DNS::Servers
     @servers : Array(String),
     @search : Array(String) = [] of String,
     @ndots : Int32 = 1,
-    @timeout : Time::Span = DNS.timeout,
+    @timeout : Time::Span? = nil,
     @attempts : Int32 = DEFAULT_ATTEMPTS,
   )
+  end
+
+  def timeout(default : Time::Span = DNS.timeout) : Time::Span
+    @timeout || default
   end
 
   # Clear cached host configuration to force reload

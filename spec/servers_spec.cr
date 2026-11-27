@@ -1,3 +1,5 @@
+require "./spec_helper"
+
 describe DNS::Servers do
   describe ".expand" do
     it "handles FQDN with trailing dot" do

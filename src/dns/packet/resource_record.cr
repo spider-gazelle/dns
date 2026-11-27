@@ -27,7 +27,12 @@ struct DNS::Packet::ResourceRecord
     resource_data = Bytes.new(rdlength)
     io.read_fully(resource_data)
 
-    resource = DNS::Resource::LOOKUP[type]?.try(&.new(resource_data, io.to_slice))
+    resource = begin
+      DNS::Resource::LOOKUP[type]?.try(&.new(resource_data, io.to_slice))
+    rescue ex : IO::Error
+      raise ex unless type.in?({RecordType::SVCB.value, RecordType::HTTPS.value})
+      nil
+    end
     new(name, type, class_code, ttl, resource, resource_data)
   end
 
@@ -38,17 +43,7 @@ struct DNS::Packet::ResourceRecord
   end
 
   def to_io(io : IO, format : IO::ByteFormat = IO::ByteFormat::BigEndian)
-    # an empty name is the DNS root and must be encoded as a single zero byte
-    # (e.g. the EDNS0 OPT pseudo-record); splitting "" would emit two zero bytes
-    if name.empty?
-      io.write_byte(0_u8)
-    else
-      name.split('.').each do |label|
-        io.write_byte(label.size.to_u8)
-        io.write(label.to_slice)
-      end
-      io.write_byte(0_u8) # Null terminator for the domain name
-    end
+    Resource.write_labels(io, name)
     io.write_bytes(type, IO::ByteFormat::BigEndian)
     io.write_bytes(class_code, IO::ByteFormat::BigEndian)
     io.write_bytes(ttl.total_seconds.to_u32, IO::ByteFormat::BigEndian)
@@ -57,7 +52,7 @@ struct DNS::Packet::ResourceRecord
   end
 
   def to_s : String
-    data_str = parsed_data ? parsed_data.to_s : "Raw Data: #{resource_data.hexstring}"
+    data_str = resource.try(&.to_s) || "Raw Data: #{resource_data.hexstring}"
     "Name: #{name}, Type: #{type}, Class: #{class_code}, TTL: #{ttl}, Data: #{data_str}"
   end
 
@@ -94,7 +89,7 @@ struct DNS::Packet::ResourceRecord
   end
 
   # a helper for obtaining TXT record data
-  def text_data : String
+  def text_data : Array(String)
     resource.as(Resource::TXT).text_data
   end
 end

@@ -47,7 +47,7 @@ describe DNS::Resource do
     response.questions.first.name.should eq "isc.org"
     response.answers.size.should eq 4
     response.answers.first.ttl.should eq 1.hour
-    response.answers[0].resource.as(DNS::Resource::NS).name_server.should eq "ns-ext.nrt1.isc.org"
+    response.answers[0].name_server.should eq "ns-ext.nrt1.isc.org"
     response.answers[1].resource.as(DNS::Resource::NS).name_server.should eq "ns-ext.sth1.isc.org"
     response.answers[2].resource.as(DNS::Resource::NS).name_server.should eq "ns-ext.isc.org"
     response.answers[3].resource.as(DNS::Resource::NS).name_server.should eq "ns-ext.lga1.isc.org"
@@ -59,7 +59,7 @@ describe DNS::Resource do
 
     response.questions.first.name.should eq "google.com"
     response.answers.first.ttl.should eq(4.minutes + 30.seconds)
-    response.answers.first.resource.as(DNS::Resource::TXT).text_data.should eq ["v=spf1 ptr ?all"]
+    response.answers.first.text_data.should eq ["v=spf1 ptr ?all"]
   end
 
   it "should parse a MX response" do
@@ -98,7 +98,7 @@ describe DNS::Resource do
     response.questions.first.name.should eq "wwwimages.adobe.com"
     response.answers.first.ttl.should eq 45.seconds
 
-    response.answers[0].resource.as(DNS::Resource::CNAME).target.should eq "wwwimages.wip4.adobe.com"
+    response.answers[0].cname.should eq "wwwimages.wip4.adobe.com"
     response.answers[1].resource.as(DNS::Resource::CNAME).target.should eq "wwwimages.adobe.com.edgesuite.net"
     response.answers[2].resource.as(DNS::Resource::CNAME).target.should eq "wwwimages.adobe.com.edgesuite.net.globalredir.akadns.net"
     response.answers[3].resource.as(DNS::Resource::CNAME).target.should eq "a1953.x.akamai.net"

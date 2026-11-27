@@ -12,7 +12,8 @@ require "../../dns"
       family ||= Family::UNSPEC
 
       is_ip = Socket::IPAddress.valid?(domain)
-      if is_ip || family.unix? || domain.includes?('/') || DNS.select_resolver(domain).is_a?(DNS::Resolver::System)
+      if is_ip || family.unix? || domain.includes?('/') ||
+         DNS::Resolver.system_resolution?(domain) || DNS.select_resolver(domain).is_a?(DNS::Resolver::System)
         domain = URI::Punycode.to_ascii domain
         Crystal::System::Addrinfo.getaddrinfo(domain, service, family, type, protocol, timeout, is_ip ? ::LibC::AI_NUMERICHOST : 0) do |addrinfo|
           yield addrinfo

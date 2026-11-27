@@ -1,9 +1,43 @@
 require "./spec_helper"
+require "./support/dns_stub"
+
+private class SystemFallbackProbe < DNS::Resolver::UDP
+  getter attempted = [] of String
+
+  def query(
+    domain : String,
+    dns_server : String,
+    fetch : Hash(UInt16, UInt16),
+    timeout : Time::Span = ::DNS.timeout,
+    & : DNS::Packet ->
+  )
+    @attempted << dns_server
+    raise IO::TimeoutError.new("first server timed out") if @attempted.size == 1
+
+    fetch.each do |id, type|
+      record = DNS::Packet::ResourceRecord.new(domain, type, 1_u16, 1.minute)
+      yield DNS::Packet.new(id: id, response: true, answers: [record])
+    end
+  end
+end
 
 describe DNS do
   it "should select the appropriate resolver" do
     DNS.select_resolver("starling-home-hub.local").is_a?(DNS::Resolver::MDNS).should be_true
-    DNS.select_resolver("www.google.com").is_a?(DNS::Resolver::UDP).should be_true
+    DNS.select_resolver("www.example.test").is_a?(DNS::Resolver::UDP).should be_true
+  end
+
+  it "uses the current global timeout unless the resolver has an override" do
+    previous = DNS.timeout
+    resolver = DNS::Resolver::UDP.new(["127.0.0.1"])
+    resolver.server_config = DNS::Servers.new(["127.0.0.1"])
+    DNS.timeout = 7.seconds
+    resolver.base_timeout.should eq 7.seconds
+    resolver.server_config.timeout = 4.seconds
+    DNS.timeout = 9.seconds
+    resolver.base_timeout.should eq 4.seconds
+  ensure
+    DNS.timeout = previous if previous
   end
 
   it "returns host file entries" do
@@ -28,151 +62,136 @@ describe DNS do
     response.size.should eq 0
   end
 
-  it "queries for A, AAAA and SVCB records" do
-    response = DNS.query(
-      "www.microsoft.com",
-      [
-        DNS::RecordType::A,
-        DNS::RecordType::AAAA,
-        DNS::RecordType::HTTPS,
-      ]
-    )
+  it "queries for A, AAAA and HTTPS records" do
+    stub = DNSStub.new
+    stub.serve_udp do |query, _, _|
+      question = query.questions.first
+      answer = case question.type
+               when  1 then a_answer(question.name)
+               when 28 then aaaa_answer(question.name)
+               else         DNS::Packet::ResourceRecord.new(question.name, 65_u16, 1_u16, 60.seconds, resource_data: Bytes[0, 1, 0])
+               end
+      dns_response(query, answers: [answer])
+    end
+    DNS.default_resolver = udp_resolver(stub)
 
-    response.size.should be >= 3
+    answers = DNS.query("records.test.", [DNS::RecordType::A, DNS::RecordType::AAAA, DNS::RecordType::HTTPS])
+    answers.map(&.record_type).sort!.should eq [DNS::RecordType::A, DNS::RecordType::AAAA, DNS::RecordType::HTTPS]
+    answers.find!(&.record_type.https?).resource.as(DNS::Resource::HTTPS).priority.should eq 1
+  ensure
+    stub.try(&.close)
   end
 
-  it "queries for MX records and caches additional IP addresses" do
-    response = DNS.query("proton.me", [DNS::RecordType::MX])
-    response.size.should eq 2
+  it "queries for MX records and caches the additional address without another query" do
+    stub = DNSStub.new
+    stub.serve_udp do |query, _, _|
+      exchange = "mail.exchange.test"
+      data = IO::Memory.new
+      data.write_bytes(10_u16, IO::ByteFormat::BigEndian)
+      DNS::Resource.write_labels(data, exchange)
+      answer = DNS::Packet::ResourceRecord.new("exchange.test", 15_u16, 1_u16, 60.seconds, resource_data: data.to_slice)
+      dns_response(query, answers: [answer], additionals: [a_answer(exchange)])
+    end
+    DNS.default_resolver = udp_resolver(stub)
+
+    answers = DNS.query("exchange.test.", [DNS::RecordType::MX])
+    answers.map(&.record_type).should eq [DNS::RecordType::MX]
+    answers.first.resource.as(DNS::Resource::MX).exchange.should eq "mail.exchange.test"
+    DNS.query("mail.exchange.test.", [DNS::RecordType::A]).map(&.ip_address.address).should eq ["93.184.216.34"]
+    stub.request_count.should eq 1
+  ensure
+    stub.try(&.close)
   end
 
-  it "queries using HTTPS resolver" do
-    DNS.default_resolver = DNS::Resolver::HTTPS.new(["https://1.1.1.1/dns-query"])
+  it "demotes an unresponsive loopback server" do
+    primary = DNSStub.new
+    backup = DNSStub.new("::1", primary.port)
+    primary.serve_udp { |_, _, _| nil }
+    backup.serve_udp do |query, _, _|
+      dns_response(query, answers: [a_answer(query.questions.first.name)])
+    end
 
-    response = DNS.query(
-      "www.google.com",
-      [
-        DNS::RecordType::A,
-        DNS::RecordType::AAAA,
-      ]
-    )
-
-    response.size.should be >= 2
-    response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
-  end
-
-  it "queries using TLS resolver" do
-    DNS.default_resolver = DNS::Resolver::TLS.new({
-      "8.8.8.8" => "dns.google",
-    })
-
-    response = DNS.query(
-      "www.google.com",
-      [
-        DNS::RecordType::A,
-        DNS::RecordType::AAAA,
-      ]
-    )
-
-    response.size.should be >= 2
-    response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
-  end
-
-  it "demotes bad servers" do
-    resolver = DNS::Resolver::UDP.new(["192.168.22.22", "8.8.8.8"])
-    resolver.servers.should eq ["192.168.22.22", "8.8.8.8"]
+    servers = ["127.0.0.1", "::1"]
+    resolver = DNS::Resolver::UDP.new(servers, port: primary.port.to_u16)
+    resolver.server_config = DNS::Servers.new(servers, timeout: 1.second, attempts: 1)
     resolver.failure_limit = 1
-
     DNS.default_resolver = resolver
-    response = DNS.query(
-      "www.google.com",
-      [
-        DNS::RecordType::A,
-        DNS::RecordType::AAAA,
-      ]
-    )
 
-    response.size.should be >= 2
-    response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
-
-    resolver.servers.should eq ["8.8.8.8", "192.168.22.22"]
+    DNS.query("address.test.", [DNS::RecordType::A]).map(&.ip_address.address).should eq ["93.184.216.34"]
+    resolver.servers.should eq ["::1", "127.0.0.1"]
+  ensure
+    primary.try(&.close)
+    backup.try(&.close)
   end
 
-  it "handles errors when returned from the server" do
-    expect_raises(DNS::Packet::NameError, "Hostname lookup for ww1.notexisting12345.com failed") do
-      DNS.query(
-        "ww1.notexisting12345.com",
-        [
-          DNS::RecordType::A,
-          DNS::RecordType::AAAA,
-        ]
-      )
+  it "handles NXDOMAIN responses" do
+    stub = DNSStub.new
+    stub.serve_udp { |query, _, _| dns_response(query, response_code: 3_u8) }
+    DNS.default_resolver = udp_resolver(stub)
+
+    expect_raises(DNS::Packet::NameError, "Hostname lookup for missing.test failed") do
+      DNS.query("missing.test.", [DNS::RecordType::A, DNS::RecordType::AAAA])
     end
+  ensure
+    stub.try(&.close)
   end
 
-  it "can perform IPv4 reverse lookups" do
-    responses = DNS.query("gmail.com", {DNS::RecordType::A})
-    ip = responses.find!(&.record_type.a?).ip_address
-
-    reverse_domains = DNS.reverse_lookup ip
-    reverse_domains.size.should be > 0
-  end
-
-  it "can perform IPv6 reverse lookups" do
-    responses = DNS.query("gmail.com", [DNS::RecordType::AAAA])
-    ip = responses.find!(&.record_type.aaaa?).ip_address
-
-    reverse_domains = DNS.reverse_lookup ip
-    reverse_domains.size.should be > 0
-  end
-
-  # note:: mDNS does not work in wsl on Windows
-  # it does work when run as a windows application
-  it "queries a .local service" do
-    pending!("must have a service available locally on the network")
-
-    response = DNS.query(
-      "starling-home-hub.local",
-      [
-        DNS::RecordType::A,
-        DNS::RecordType::AAAA,
-      ]
-    )
-
-    # Even though we only queried for A or AAAA the devices
-    # would return both addresses for either query
-    response.size.should eq 4
-  end
-
-  it "works with system addrinfo resolution" do
-    DNS.default_resolver = DNS::Resolver::System.new
-
-    # supported records
-    response = DNS.query(
-      "www.google.com",
-      [
-        DNS::RecordType::A,
-        DNS::RecordType::AAAA,
-      ]
-    )
-
-    # We do expect both responses but on windows CI runners we only get one
-    response.size.should be >= 1
-    response.map(&.ip_address).first.is_a?(Socket::IPAddress).should be_true
-
-    # compatible errors
-    expect_raises(DNS::Packet::NameError, /Hostname lookup for ww1.notexisting12345.com failed/) do
-      DNS.query(
-        "ww1.notexisting12345.com",
-        [
-          DNS::RecordType::A,
-          DNS::RecordType::AAAA,
-        ]
-      )
+  it "builds the correct IPv4 reverse name" do
+    stub = DNSStub.new
+    stub.serve_udp do |query, _, _|
+      question = query.questions.first
+      if question.type == DNS::RecordType::PTR.value && question.name == "1.2.0.192.in-addr.arpa"
+        dns_response(query, answers: [domain_answer(question.name, DNS::RecordType::PTR, "ipv4.test")])
+      else
+        dns_response(query, response_code: 3_u8)
+      end
     end
+    DNS.default_resolver = udp_resolver(stub)
 
-    # fallback for other records
-    response = DNS.query("proton.me", [DNS::RecordType::MX])
-    response.size.should eq 2
+    DNS.reverse_lookup(Socket::IPAddress.new("192.0.2.1", 0)).should eq ["ipv4.test"]
+  ensure
+    stub.try(&.close)
+  end
+
+  it "builds the correct IPv6 reverse name" do
+    stub = DNSStub.new
+    stub.serve_udp do |query, _, _|
+      question = query.questions.first
+      reverse_name = "1." + ("0." * 23) + "8.b.d.0.1.0.0.2.ip6.arpa"
+      if question.type == DNS::RecordType::PTR.value && question.name == reverse_name
+        dns_response(query, answers: [domain_answer(question.name, DNS::RecordType::PTR, "ipv6.test")])
+      else
+        dns_response(query, response_code: 3_u8)
+      end
+    end
+    DNS.default_resolver = udp_resolver(stub)
+
+    DNS.reverse_lookup(Socket::IPAddress.new("2001:db8::1", 0)).should eq ["ipv6.test"]
+  ensure
+    stub.try(&.close)
+  end
+
+  it "uses native addrinfo for localhost" do
+    fallback = DNS::Resolver::UDP.new([] of String)
+    resolver = DNS::Resolver::System.new(fallback)
+    DNS.default_resolver = resolver
+    answers = [] of DNS::Packet::ResourceRecord
+
+    resolver.query("localhost", "127.0.0.1", {1_u16 => DNS::RecordType::A.value}, 2.seconds) do |packet|
+      answers.concat(packet.answers)
+    end
+    addresses = answers.map(&.ip_address.address)
+    addresses.should contain "127.0.0.1"
+  end
+
+  it "retries non-address questions via the system resolver's next fallback server" do
+    servers = ["127.0.0.1", "127.0.0.2"]
+    fallback = SystemFallbackProbe.new(servers)
+    resolver = DNS::Resolver::System.new(fallback: fallback)
+    resolver.server_config = DNS::Servers.new(servers, attempts: 1)
+    DNS.default_resolver = resolver
+
+    DNS.query("exchange.test.", [DNS::RecordType::MX]).map(&.record_type).should eq [DNS::RecordType::MX]
+    fallback.attempted.should eq servers
   end
 end

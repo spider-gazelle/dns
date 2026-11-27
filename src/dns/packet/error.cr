@@ -1,4 +1,5 @@
 class DNS::Packet::Error < Exception
+  property extended_errors = [] of DNS::Packet::EDNS::ExtendedError
 end
 
 # The name server was unable to interpret the query.
@@ -20,4 +21,13 @@ end
 
 # The name server refuses to perform the specified operation for policy reasons.
 class DNS::Packet::RefusedError < DNS::Packet::Error
+end
+
+# A non-zero DNS response code without a dedicated exception type.
+class DNS::Packet::ResponseError < DNS::Packet::Error
+  getter code : UInt16
+
+  def initialize(message : String, @code : UInt16)
+    super("#{message} (DNS response code #{@code})")
+  end
 end

@@ -53,7 +53,7 @@ DNS.resolvers[/.+\.com\.au$/i] = DNS::Resolver::HTTPS.new(["https://1.1.1.1/dns-
 # if you'd prefer to use the system resolver for A and AAAA records
 DNS.default_resolver = DNS::Resolver::System.new(
   # uses the fallback resolver for other DNS records
-  fallback: Resolver::UDP.new
+  fallback: DNS::Resolver::UDP.new
 )
 
 # for the TLS resolver you need to specify a domain name for the returned TLS certificate
@@ -93,9 +93,12 @@ The UDP resolver is modelled on the behaviour of unix `getaddrinfo`:
   later queries prefer healthy servers
 * `resolv.conf` options are honoured: `timeout:` (default `2s`, clamped `1..30`),
   `attempts:` (default `3`, clamped `1..5`) and `ndots:` (default `1`, clamped
-  `0..15`). The base timeout can also be set globally with `DNS.timeout`.
-* an EDNS0 OPT record is sent advertising a 1232 byte UDP payload (DNS Flag Day
-  2020), and truncated (`TC`) responses are transparently refetched over TCP
+  `0..15`). Set the global base timeout with `DNS.timeout`. An explicit
+  `timeout:` in `resolv.conf` or a resolver's server configuration takes precedence.
+* UDP advertises a 1232-byte EDNS0 payload. When the query has no required EDNS
+  options or negotiated cookie, the resolver also tries without EDNS if the
+  server rejects it or stays silent through half the attempt. Truncated (`TC`)
+  replies are refetched over TCP within the same deadline.
 
 ```crystal
 # tune the base (initial) per-try timeout; backoff doubles it each attempt
@@ -114,16 +117,45 @@ Reusing one source port trades some of the source-port entropy recommended by
 so every response is strictly validated before it is accepted: the transaction
 id (a CSPRNG value) must be outstanding, the `QR` bit must be set, the source
 address must match the queried server, and the echoed question must match the
-request. This is appropriate for a stub resolver talking to a trusted recursive
+request. An EDNS rejection without an echoed question can trigger a legacy
+retry. This is appropriate for a stub resolver talking to a trusted recursive
 resolver. If you operate over an untrusted path, prefer the TLS or HTTPS
 resolvers.
+
+UDP negotiates DNS Cookies per upstream and local address. A valid
+`BADCOOKIE` response triggers a retry with the replacement cookie, followed
+by TCP if the server challenges the retry. Set `resolver.dns_cookies = false`
+to disable negotiation.
+
+### EDNS options and service bindings
+
+UDP, TCP fallback, DNS-over-TLS, and DNS-over-HTTPS can send options configured
+on the resolver's `edns_options` property. Low-level packet callers can pass
+a `DNS::Packet::EDNS` to `Question.build_query` and read reply options through
+`packet.edns`. Extended DNS Errors are available through
+`packet.extended_errors` or `DNS::Packet::Error#extended_errors` when a
+lookup raises.
+
+`DNS::Resource::SVCB` and `DNS::Resource::HTTPS` expose typed ALPN, port, and
+address hints. Pass the parameter keys your application can honor to
+`compatible?(supported_keys)` before using a service binding.
 
 Other things to note:
 
 * IPv6 is supported and handled transparently
-* a DNS cache is maintained and used based on TTL of responses
-* DNS servers may return results of expected future queries, these results are cached
-* force all DNS lookups to occur via this library: `require "dns/ext/addrinfo"`
+* the cache keeps complete record sets and expires them using their shortest TTL, including any CNAMEs they depend on
+* NXDOMAIN is cached by name and NODATA by name and query type, with expiration derived from the authority section's SOA
+* additional records can satisfy later lookups while a cached direct answer takes precedence
+* network results are cached by name and resolver. Entries inserted directly into `DNS.cache` by the application are shared.
+* search candidates use any resolver route that matches their expanded name, including mDNS for `.local`
+* `require "dns/ext/addrinfo"` uses this library for socket name lookups. Hostname-based DoH endpoints are bootstrapped with the system resolver.
+
+Set `ipv4_interface` to a local IPv4 address or `ipv6_interface` to an interface
+index when a multicast query needs a specific interface.
+
+The specs use local fixtures and run without public DNS. Run the mDNS specs
+with `crystal spec spec/mdns_resolver_spec.cr`. On Linux this includes a multicast
+query over the loopback interface.
 
 ## Contributing
 

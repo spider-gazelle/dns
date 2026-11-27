@@ -21,20 +21,14 @@ class DNS::Resolver::System < DNS::Resolver
     timeout : Time::Span = ::DNS.timeout,
     & : DNS::Packet ->
   )
-    # split out A and AAAA requests for processing seperately
-    fallback_fetch = nil
-    fetch.select! do |req_id, record_type|
-      next true if record_type.in?({A, AAAA})
-      fallback_fetch ||= Hash(UInt16, UInt16).new
-      fallback_fetch[req_id] = record_type
-      nil
-    end
+    address_fetch = fetch.select { |_, type| type.in?({A, AAAA}) }
+    fallback_fetch = fetch.reject { |_, type| type.in?({A, AAAA}) }
 
     # fetch records using the system query
     system_results = begin
-      case fetch.size
+      case address_fetch.size
       when 1
-        family = fetch.values.first == A ? Socket::Family::INET : Socket::Family::INET6
+        family = address_fetch.values.first == A ? Socket::Family::INET : Socket::Family::INET6
         Socket::Addrinfo.tcp(domain, 443, family, timeout: timeout)
       when 2
         Socket::Addrinfo.tcp(domain, 443, Socket::Family::UNSPEC, timeout: timeout)
@@ -46,25 +40,26 @@ class DNS::Resolver::System < DNS::Resolver
     end
 
     # dress the results up as a DNS response
-    unless system_results.empty?
-      records = system_results.map do |addrinfo|
-        resource = case addrinfo.family
-                   in .inet?
-                     Resource::A.new(addrinfo.ip_address.address)
-                   in .inet6?
-                     Resource::AAAA.new(addrinfo.ip_address.address)
-                   in .unix?, .unspec?
-                     raise ArgumentError.new("unexpected Addrinfo#family response #{addrinfo.family}")
-                   end
+    records_by_type = system_results.map do |addrinfo|
+      resource = case addrinfo.family
+                 in .inet?
+                   Resource::A.new(addrinfo.ip_address.address)
+                 in .inet6?
+                   Resource::AAAA.new(addrinfo.ip_address.address)
+                 in .unix?, .unspec?
+                   raise ArgumentError.new("unexpected Addrinfo#family response #{addrinfo.family}")
+                 end
 
-        Packet::ResourceRecord.new(domain, resource.record_type, ClassCode::Internet.value, 0.seconds, resource)
-      end
+      Packet::ResourceRecord.new(domain, resource.record_type, ClassCode::Internet.value, 0.seconds, resource)
+    end.group_by(&.type)
 
-      yield DNS::Packet.new(id: 0_u16, response: true, answers: records)
+    address_fetch.each do |id, type|
+      records = records_by_type[type]? || [] of Packet::ResourceRecord
+      yield DNS::Packet.new(id: id, response: true, answers: records)
     end
 
     # perform any other queries
-    if fallback_fetch
+    unless fallback_fetch.empty?
       fallback.query(domain, dns_server, fallback_fetch, timeout) do |packet|
         yield packet
       end

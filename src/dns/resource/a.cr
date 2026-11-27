@@ -10,6 +10,7 @@ module DNS
     end
 
     def initialize(resource_data : Bytes, message : Bytes)
+      raise IO::Error.new("invalid A record length") unless resource_data.size == 4
       @address = resource_data.map(&.to_s).join(".")
     end
 

@@ -3,12 +3,12 @@ class DNS::Servers
 
   # Load DNS configuration from /etc/resolv.conf
   # Returns: {servers, search_domains, ndots, timeout, attempts}
-  protected def self.load_system_config : Tuple(Array(String), Array(String), Int32, Time::Span, Int32)
+  protected def self.load_system_config : Tuple(Array(String), Array(String), Int32, Time::Span?, Int32)
     servers = [] of String
     search = [] of String
     domain : String? = nil
     ndots = 1                   # default per resolv.conf(5)
-    timeout = DNS.timeout       # base per-try timeout
+    timeout = nil               # use DNS.timeout unless overridden
     attempts = DEFAULT_ATTEMPTS # whole-list query passes
 
     File.open(resolv_conf) do |file|
@@ -41,11 +41,11 @@ class DNS::Servers
     {servers, search, ndots, timeout, attempts}
   rescue ex
     Log.warn(exception: ex) { "failed to parse resolv.conf: #{resolv_conf}" }
-    {[] of String, [] of String, 1, DNS.timeout, DEFAULT_ATTEMPTS}
+    {[] of String, [] of String, 1, nil, DEFAULT_ATTEMPTS}
   end
 
   # parse a resolv.conf `options` line, returning updated {ndots, timeout, attempts}
-  protected def self.parse_options(line : String, ndots : Int32, timeout : Time::Span, attempts : Int32) : Tuple(Int32, Time::Span, Int32)
+  protected def self.parse_options(line : String, ndots : Int32, timeout : Time::Span?, attempts : Int32) : Tuple(Int32, Time::Span?, Int32)
     line.split.each do |opt|
       key, _, value = opt.partition(':')
       number = value.to_i?

@@ -21,11 +21,15 @@ module DNS
     /.+\.local$/i => Resolver::MDNS.new,
   }
   class_property cache : Cache { Cache::HashMap.new }
+  @@cache_lock = Mutex.new
 
-  def cache=(cache : Cache)
-    # ensure previous cache is shutdown cleanly
-    @cache.try(&.close)
-    previous_def(cache)
+  def self.cache=(cache : Cache)
+    @@cache_lock.synchronize do
+      old = @@cache
+      previous_def(cache)
+      old.close if old && old != cache
+    end
+    cache
   end
 
   # Specifies the kind of query in this message.
@@ -96,22 +100,19 @@ module DNS
   end
 
   # finds the first matching resolver for the domain provided
-  def self.select_resolver(domain : String) : Resolver
-    resolver = default_resolver
+  def self.select_resolver(domain : String, *, fallback : Resolver = default_resolver) : Resolver
+    domain = domain.rchop('.')
     resolvers.each do |regex, res|
-      if regex =~ domain
-        resolver = res
-        break
-      end
+      return res if regex.matches?(domain)
     end
-    resolver
+    fallback
   end
 
   # query the DNS records of a domain and return the answers
   #
   # Automatically expands domain names using the resolver's search domains and ndots settings.
-  # Tries each expanded candidate in order until one succeeds.
-  # Results are cached against the original (pre-expanded) domain name.
+  # Tries expanded candidates in order until one answers a requested record type.
+  # Network results are cached under the candidate name and its resolver.
   #
   # NOTE:: A or AAAA answers may include cname and other records that are not directly relevent to the query.
   # It is up to the consumer to filter for the relevant results
@@ -127,17 +128,13 @@ module DNS
       return
     end
 
-    # Normalize the domain for cache lookups
-    # RFC 3986: internationalized domain names must be transformed to IDNA encoding
-    cache_key = URI::Punycode.to_ascii domain.downcase
+    original_name = normalize_name(domain)
     query_records_set = query_records.map { |query| query.is_a?(RecordType) ? query.value : query }.to_set
     queries_to_send = {} of UInt16 => UInt16
 
-    # Check hosts file and cache BEFORE expansion
-    cache_local = cache
     query_records_set.each do |record|
-      if cached_record = Hosts.lookup(cache_key, record) || cache_local.lookup(cache_key, record)
-        yield cached_record
+      if host = Hosts.lookup(original_name, record)
+        yield host
         next
       end
 
@@ -152,63 +149,86 @@ module DNS
       queries_to_send[query_id] = record
     end
 
-    # Return if all queries are answered from cache/hosts
     return if queries_to_send.empty?
 
-    # Select resolver (e.g., mDNS for .local domains)
     resolver = select_resolver(domain)
-
-    # Expand domain using the resolver's search domain configuration
-    candidates = resolver.server_config.expand(domain)
-
-    last_error : Exception? = nil
-    candidates.each do |candidate|
-      query_single(candidate, queries_to_send, resolver, cache_key, cache_local) do |answer|
+    candidates = resolver.server_config.expand(domain).map { |name| normalize_name(name) }.uniq!
+    cache_local = cache
+    if candidates.size == 1
+      query_candidate(candidates.first, queries_to_send, resolver, cache_local) do |answer|
         yield answer
       end
-      return # Success - stop trying candidates
-    rescue ex : DNS::Packet::NameError
-      last_error ||= ex
-      # Try next candidate
+      return
     end
 
-    raise last_error if last_error
+    first_empty_answer : Array(Packet::ResourceRecord)? = nil
+    first_name_error : Packet::NameError? = nil
+    requested_types = queries_to_send.values.to_set
+    candidates.each do |candidate|
+      candidate_resolver = candidate == original_name ? resolver : select_resolver(candidate, fallback: resolver)
+      answers = [] of Packet::ResourceRecord
+      query_candidate(candidate, queries_to_send, candidate_resolver, cache_local) { |answer| answers << answer }
+      if answers.any? { |answer| requested_types.includes?(answer.type) }
+        answers.each { |answer| yield answer }
+        return
+      end
+      first_empty_answer ||= answers
+    rescue ex : Packet::NameError
+      first_name_error ||= ex
+    end
+
+    if first_empty_answer
+      first_empty_answer.each { |answer| yield answer }
+    elsif first_name_error
+      raise first_name_error
+    end
   end
 
-  # Query a single domain name without search domain expansion or cache lookup
-  # Cache results against both the original domain (cache_key) and expanded domain
-  protected def self.query_single(
+  private def self.normalize_name(name : String) : String
+    URI::Punycode.to_ascii(name.rchop('.').downcase)
+  end
+
+  private def self.query_candidate(
     domain : String,
     queries_to_send : Hash(UInt16, UInt16),
     resolver : Resolver,
-    cache_key : String,
     cache_local : Cache,
     &
   ) : Nil
-    # Normalize the candidate domain for the actual DNS query
-    domain = URI::Punycode.to_ascii domain.downcase
+    scoped_name = Cache.scoped_name(domain, resolver.cache_scope)
+    outstanding = queries_to_send.reject do |_, type|
+      records = cache_local.lookup_all(scoped_name, type) || cache_local.lookup_all(domain, type)
+      if records
+        records.each { |record| yield record }
+        true
+      else
+        denial = cache_local.lookup_negative(scoped_name, type)
+        if denial && denial.name_error?
+          error = Packet::NameError.new("Hostname lookup for #{domain} failed")
+          error.extended_errors = denial.extended_errors
+          raise error
+        end
+        !denial.nil?
+      end
+    end
+    return if outstanding.empty?
 
-    # Track which questions have been answered so far
-    questions_answered = Array(UInt16).new(queries_to_send.size)
-
-    # query the server
     resolver.select_server do |dns_server, timeout|
-      queries_to_send.reject!(questions_answered)
-
-      Log.trace { "Querying #{dns_server} -- domain: #{domain.inspect}, records: #{queries_to_send.values}" }
-      resolver.query(domain, dns_server, queries_to_send, timeout) do |response|
-        # raise any errors,
-        # ServerError will be handled by moving to the next DNS server, assuming there is one
-        # other errors indicate an issue with the request and will be propagated
+      Log.trace { "Querying #{dns_server} -- domain: #{domain.inspect}, records: #{outstanding.values}" }
+      resolver.query(domain, dns_server, outstanding.dup, timeout) do |response|
+        if type = outstanding[response.id]?
+          begin
+            cache_local.store_negative_answer(domain, type, response, scope: resolver.cache_scope)
+          rescue ex
+            Log.trace(exception: ex) { "could not cache negative DNS response for #{domain}" }
+          end
+        end
         response.raise_on_error!
-        questions_answered << response.id
-
-        # Cache against the original domain name
-        cache_local.store(cache_key, response) rescue nil
-
-        # Also cache against the expanded domain if different (both are valid lookups)
-        if domain != cache_key
-          cache_local.store(domain, response) rescue nil
+        outstanding.delete(response.id)
+        begin
+          cache_local.store(domain, response, scope: resolver.cache_scope)
+        rescue ex
+          Log.trace(exception: ex) { "could not cache DNS response for #{domain}" }
         end
 
         response.answers.each do |answer|

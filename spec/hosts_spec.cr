@@ -1,3 +1,5 @@
+require "./spec_helper"
+
 describe DNS::Hosts do
   it "should return entries defined in the system hosts file" do
     ip = DNS::Hosts.lookup("localhost", DNS::Resource::A::RECORD_TYPE).as(DNS::Packet::ResourceRecord).ip_address

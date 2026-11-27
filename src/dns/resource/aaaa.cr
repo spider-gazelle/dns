@@ -10,6 +10,7 @@ module DNS
     end
 
     def initialize(resource_data : Bytes, message : Bytes)
+      raise IO::Error.new("invalid AAAA record length") unless resource_data.size == 16
       @address = resource_data.each_slice(2).join(":") do |bytes|
         ((bytes[0].to_u16 << 8) | bytes[1].to_u16).to_s(16)
       end
